@@ -1,10 +1,13 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Page } from "playwright";
+import { toPaymentPage as reachCheckout } from "./cart.js";
 import { typeCardInto } from "./fill.js";
 import { attachFrames } from "./frames.js";
 import { createJobStore } from "./jobs.js";
 import { createLiveView } from "./liveview.js";
+import { runLogger } from "./log.js";
+import { navigateToPayment } from "./navigator.js";
 import { runPurchase } from "./run.js";
 import { browserForEnv, createPurchaseServer, releaseBrowser } from "./server.js";
 import { readMerchantTotal } from "./total.js";
@@ -58,34 +61,66 @@ function publicBaseUrl(server: Server, fallbackPort: number): string {
   return `http://127.0.0.1:${addr?.port ?? fallbackPort}`;
 }
 
-/** Opens the listing and gets to a page that has card fields on it. */
+/**
+ * Opens the listing and gets to a page that has card fields on it.
+ *
+ * Two strategies, in order. The deterministic one — add to cart, go to /checkout — handles a
+ * Shopify shop in two clicks and costs nothing. When it cannot get there, an LLM drives the page
+ * instead, because real checkouts ask for an email, a delivery method and a postal code in an
+ * order that differs per shop, and encoding each shop's quirks is a losing game.
+ *
+ * The model never sees or types card material either way: it stops once card fields exist, and
+ * `typeCardInto` fills them with no model in the loop.
+ */
 async function toPaymentPage(page: Page, job: PurchaseJobInput): Promise<void> {
   if (!job.listing.url) throw new Error("listing has no url");
-  await page.goto(job.listing.url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  const log = runLogger(job.attemptId);
 
-  // Already on a page with card fields? Nothing to do.
-  if (await hasCardField(page)) return;
-
-  const checkout = page.locator('a[href*="checkout" i]').first();
-  if ((await checkout.count()) > 0) {
-    await checkout.click().catch(() => {});
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
+  try {
+    await reachCheckout(page, job.listing.url, log);
+    return;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (!navigatorEnabled()) throw error;
+    log("deterministic path failed, handing over to the navigator", { reason });
   }
 
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await hasCardField(page)) return;
-    await page.waitForTimeout(250);
-  }
-  throw new Error("could not reach a page with card fields");
+  await navigateToPayment(
+    page,
+    { decide: askModel, log },
+    {
+      allowedHost: new URL(job.listing.url).hostname,
+      goal: `Buy one "${job.item.name}" — the item already in the cart. Reach the card fields.`,
+    },
+  );
 }
 
-async function hasCardField(page: Page): Promise<boolean> {
-  for (const frame of page.frames()) {
-    const field = frame.locator('input[autocomplete="cc-number"]').first();
-    if ((await field.count().catch(() => 0)) > 0) return true;
-  }
-  return false;
+const navigatorEnabled = () =>
+  process.env.CLOSER_NAVIGATOR !== "off" && Boolean(process.env.OPENAI_API_KEY);
+
+/**
+ * Asks the configured model for one browser action.
+ *
+ * Reuses Happy's OpenAI credentials rather than adding a provider: the same key already drives the
+ * planner. Swapping in Bedrock means replacing this function and nothing else.
+ */
+async function askModel(prompt: string): Promise<string> {
+  const base = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
+  const res = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL ?? "gpt-5.6-luna",
+      messages: [{ role: "user", content: prompt }],
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw new Error(`navigator model call failed (${res.status})`);
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  return data.choices?.[0]?.message?.content ?? "";
 }
 
 /**
