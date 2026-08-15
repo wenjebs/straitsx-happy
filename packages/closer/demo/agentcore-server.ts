@@ -34,7 +34,7 @@ import { readMerchantTotal } from "../src/service/total.js";
 const PORT = Number(process.env.AGENTCORE_TEST_PORT ?? 4041);
 const REGION = process.env.AWS_REGION ?? "ap-southeast-1";
 const ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:4040";
-const MAX_SLOTS = Number(process.env.AGENTCORE_MAX_SLOTS ?? 6);
+const MAX_SLOTS = Number(process.env.AGENTCORE_MAX_SLOTS ?? 10);
 
 const consoleUrl = `https://${REGION}.console.aws.amazon.com/bedrock-agentcore/home?region=${REGION}`;
 
@@ -49,9 +49,13 @@ const consoleUrl = `https://${REGION}.console.aws.amazon.com/bedrock-agentcore/h
  */
 const PRESETS = [
   { label: "Polypet", url: "https://polypet.com.sg/" },
-  { label: "Cocomo", url: "https://cocomo.sg/" },
+  { label: "Superpaws", url: "https://www.superpaws.sg/" },
+  { label: "Cocomo", url: "https://www.cocomo.sg/" },
   { label: "Prism+", url: "https://prismplus.sg/" },
-  { label: "Sweelee", url: "https://sweelee.com.sg/" },
+  { label: "Secretlab", url: "https://secretlab.sg/" },
+  { label: "Swee Lee", url: "https://www.sweelee.com.sg/" },
+  { label: "CompAsia", url: "https://compasia.sg/" },
+  { label: "Weston", url: "https://weston.com.sg/" },
   { label: "Nylon (control)", url: "https://nylon.coffee/collections/all" },
 ];
 
