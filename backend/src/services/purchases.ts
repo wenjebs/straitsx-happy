@@ -93,7 +93,10 @@ export class PurchaseService {
       processedEventIds: [],
       updatedAt: new Date().toISOString(),
     };
-    await Promise.all([this.repository.putActivity(activity), this.repository.putPurchaseRun(run)]);
+    await Promise.all([
+      this.repository.putActivity(activity, "purchase.started"),
+      this.repository.putPurchaseRun(run),
+    ]);
     this.snapshot(activity);
     void this.startNextAttempt(activityId).catch((error) => this.failRun(activityId, error));
     return activity;
@@ -394,7 +397,7 @@ export class PurchaseService {
         price: row.listing.price,
       }));
       await Promise.all([
-        this.repository.putActivity(activity),
+        this.repository.putActivity(activity, "purchase.completed"),
         this.repository.putPurchaseRun(run),
       ]);
       this.events.emit(activity.id, {
@@ -499,7 +502,7 @@ export class PurchaseService {
     );
     const line = this.logLine(item, text);
     activity.log.push(line);
-    await this.repository.putActivity(activity);
+    await this.repository.putActivity(activity, "purchase.step_updated");
     this.events.emit(activity.id, { type: "exec.step", row });
     this.events.emit(activity.id, { type: "log.line", line });
   }
@@ -511,7 +514,7 @@ export class PurchaseService {
   ): Promise<void> {
     const line = this.logLine(item, text);
     activity.log.push(line);
-    await this.repository.putActivity(activity);
+    await this.repository.putActivity(activity, "purchase.log_appended");
     this.events.emit(activity.id, { type: "log.line", line });
   }
 
@@ -543,7 +546,10 @@ export class PurchaseService {
       text: `purchase stopped · ${asMessage(error)}`,
     };
     activity.log.push(line);
-    await Promise.all([this.repository.putActivity(activity), this.repository.putPurchaseRun(run)]);
+    await Promise.all([
+      this.repository.putActivity(activity, "purchase.failed"),
+      this.repository.putPurchaseRun(run),
+    ]);
     this.events.emit(activity.id, { type: "log.line", line });
     this.snapshot(activity);
   }

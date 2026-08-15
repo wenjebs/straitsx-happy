@@ -11,7 +11,7 @@ session key the network itself constrains, is deferred — see the spec's
 out-of-scope section.
 
 Built for the AgentiX Playground. The concierge backend is integration-ready for
-separate Scout, StraitsX card, and Closer browser-agent services. Its default local
+Happy-owned OpenAI planning plus separate Scout, StraitsX card, and Closer services. Its default local
 failsafe is visibly labelled, requires Sandbox mode, and cannot spend real money.
 
 - Design: [`DESIGN.md`](./DESIGN.md)
@@ -67,7 +67,7 @@ apps/                    legacy prototypes; not used by the current runtime
 
 `backend/` implements the complete frontend contract and owns the safety
 decision. It stores production state in DynamoDB, sends jobs to the separately
-owned agent runtime, receives authenticated progress and livestream callbacks,
+owned Scout runtime, receives authenticated progress and livestream callbacks,
 grants a separate Closer agent permission to pull one exact-value card, and tracks checkout. See
 [`backend/README.md`](./backend/README.md) for both integration protocols.
 
@@ -77,13 +77,16 @@ falls back. Scout tiles embed `liveStreamUrl` from the real agent callback.
 
 ## Configuration
 
-One `.env` at the repo root is read by the backend. Copy `.env.example`, then add
-the external `AGENT_*`, `CARD_*`, and `PURCHASE_AGENT_*` values when the owning
-teams provide them. Until then, local mode runs the complete website against
+One `.env` at the repo root is read by the backend. Copy `.env.example`, add a fresh
+`OPENAI_API_KEY`, and set `PLANNER_MODE=openai` for real chat-to-wishlist planning.
+Add external `AGENT_*`, `CARD_*`, and `PURCHASE_AGENT_*` values when the owning teams
+provide them. Until then, local mode runs the complete website against
 clearly labelled Scout/card/Closer failsafes; set a provider to `disabled` if you
 want its dependent mutations to fail closed instead.
 
-Production sets `DATA_STORE=dynamodb`; local development defaults to memory.
+Every activity mutation writes the latest document and an immutable transition
+checkpoint. Production sets `DATA_STORE=dynamodb`; local development defaults to memory,
+so local checkpoints still reset when the backend process restarts.
 The full AWS deployment and two-pass image bootstrap are in
 [`terraform/README.md`](./terraform/README.md). **There are no refunds on the
 live rail.**

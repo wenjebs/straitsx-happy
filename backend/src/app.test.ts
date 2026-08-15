@@ -16,7 +16,10 @@ const config: Config = {
   AWS_REGION: "ap-southeast-1",
   FRONTEND_ORIGIN: "http://localhost:4040",
   PUBLIC_BASE_URL: "http://localhost:8787",
-  AGENT_MODE: "remote",
+  PLANNER_MODE: "remote",
+  SCOUT_MODE: "remote",
+  OPENAI_MODEL: "gpt-5.6-luna",
+  OPENAI_BASE_URL: "https://api.openai.com/v1",
   AGENT_CALLBACK_TOKEN: "callback-secret",
   CARD_MODE: "remote",
   PURCHASE_AGENT_MODE: "remote",
@@ -66,7 +69,7 @@ function harness() {
   const agents = new RecordingAgents();
   const cards = new RecordingCards();
   const purchaseAgents = new RecordingPurchaseAgents();
-  const activities = new ActivityService(repository, events, agents);
+  const activities = new ActivityService(repository, events, agents, agents);
   const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
   return {
     repository,
@@ -75,7 +78,8 @@ function harness() {
       config,
       repository,
       events,
-      agents,
+      planner: agents,
+      scouts: agents,
       cards,
       purchaseAgents,
       activities,
@@ -130,7 +134,20 @@ describe("Happy backend contract", () => {
     });
     expect(wishlist.status).toBe(202);
 
-    await app.request(`/v1/activities/${created.id}/wishlist/approve`, { method: "POST" });
+    const preparedHistory = (await (
+      await app.request(`/v1/activities/${created.id}/checkpoints`)
+    ).json()) as { reason: string; activity: { wishlist: { id: string }[] } }[];
+    expect(preparedHistory.map((row) => row.reason)).toEqual([
+      "activity.created",
+      "wishlist.prepared",
+    ]);
+    expect(preparedHistory.at(-1)?.activity.wishlist[0]?.id).toBe("keyboard");
+
+    const approved = (await (
+      await app.request(`/v1/activities/${created.id}/wishlist/approve`, { method: "POST" })
+    ).json()) as { stage: string; wishlist: { id: string }[] };
+    expect(approved.stage).toBe("curate");
+    expect(approved.wishlist[0]?.id).toBe("keyboard");
     const dispatch = await app.request(`/v1/activities/${created.id}/dispatch`, { method: "POST" });
     expect(dispatch.status).toBe(200);
     expect(agents.searches).toBe(1);

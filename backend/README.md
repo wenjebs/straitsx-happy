@@ -1,11 +1,12 @@
 # Happy backend
 
 The Hono HTTP/SSE backend for `frontend/`. It owns the mandate and wallet, stores durable state
-in DynamoDB in production, and orchestrates three deliberately separate integrations:
+in DynamoDB in production, and orchestrates four deliberately separate capabilities:
 
-1. **Scout agent** — plans the wishlist, searches listings, and supplies search livestreams.
-2. **StraitsX card provider** — issues an exact-value card only when Closer claims its grant.
-3. **Closer purchase agent** — receives one approved listing and a short-lived grant, actively
+1. **Happy OpenAI planner** — turns chat goals into typed wishlists and clarification questions.
+2. **Scout agent** — searches approved wishlist items and supplies search livestreams.
+3. **StraitsX card provider** — issues an exact-value card only when Closer claims its grant.
+4. **Closer purchase agent** — receives one approved listing and a short-lived grant, actively
    claims the card, checks out, and reports milestones plus its livestream.
 
 The backend never persists a PAN, raw card grant, or card capability token. Purchases are
@@ -21,7 +22,7 @@ corepack pnpm install
 corepack pnpm dev
 ```
 
-The defaults use `memory` storage and `local` mode for all three providers. This is an explicit
+The defaults use `memory` storage and local planner/Scout/card/Closer failsafes. This is an explicit
 failsafe walkthrough: it sends real callbacks, SSE frames, execution steps, and livestream URLs,
 but every stream says `LOCAL FAILSAFE` and no browser or payment is real. Local card and Closer
 operations refuse to run unless Settings has Sandbox enabled.
@@ -29,10 +30,14 @@ operations refuse to run unless Settings has Sandbox enabled.
 To connect the real services later:
 
 ```dotenv
-AGENT_MODE=remote
+PLANNER_MODE=openai
+OPENAI_API_KEY=replace-with-a-fresh-key
+OPENAI_MODEL=gpt-5.6-luna
+AGENT_CALLBACK_TOKEN=replace-with-a-long-random-value
+
+SCOUT_MODE=remote
 AGENT_API_BASE_URL=https://scouts.example
 AGENT_API_TOKEN=...
-AGENT_CALLBACK_TOKEN=...
 
 CARD_MODE=remote
 CARD_API_BASE_URL=https://cards.example
@@ -46,13 +51,20 @@ PURCHASE_CALLBACK_TOKEN=...
 
 Set any mode to `disabled` to make its dependent mutation return a readable `503`.
 
+## Happy OpenAI planner
+
+Happy calls `POST /v1/responses` with `store: false` and a strict JSON Schema. The result contains
+the title, assistant reply, editable wishlist, estimate, and clarification options. Happy assigns
+stable item ids, validates the response again with Zod, and commits `wishlist.prepared` before the
+user can approve it. The API key is server-only and must be supplied through the environment or
+AWS Secrets Manager.
+
 ## Scout API Happy calls
 
 All requests are JSON `POST`s and include a callback `{ url, token }`.
 
 | Path | Purpose |
 |---|---|
-| `/v1/runs/plan` | Decompose the goal into wishlist items and clarifications. |
 | `/v1/runs/search` | Start two Scouts per item and find candidate listings. |
 | `/v1/runs/:activityId/pause` | Pause browser sessions. |
 | `/v1/runs/:activityId/resume` | Resume browser sessions. |
@@ -104,10 +116,13 @@ Production uses one table:
 | Entity/access | Keys |
 |---|---|
 | Activity by id | `pk=ACTIVITY#<id>`, `sk=META` |
+| Immutable transition history | `pk=ACTIVITY#<id>`, `sk=CHECKPOINT#<time>#<id>` |
 | Activities by user/date | `gsi1pk=USER#<id>`, `gsi1sk=<createdAt>#<id>` |
 | Purchase state-machine cursor | `pk=ACTIVITY#<id>`, `sk=PURCHASE` |
 | Wallet/mandate/settings/profile | `pk=USER#<id>`, `sk=<type>` |
 | Purchase/idempotency lock | `pk=PURCHASE#<activityId>`, `sk=LOCK` |
 
-The conditional purchase lock makes a repeated key return the existing execution and prevents a
-different key from starting another purchase.
+Every `putActivity` atomically writes the latest `META` document and a full immutable checkpoint.
+`GET /v1/activities/:id/checkpoints` returns those transitions in order. The conditional purchase
+lock makes a repeated key return the existing execution and prevents a different key from starting
+another purchase.

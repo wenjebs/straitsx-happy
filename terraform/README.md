@@ -35,10 +35,11 @@ terraform apply
 The first apply leaves `deploy_backend=false`. It creates the ECR repository and secret before an
 image or secret value is needed.
 
-Populate the secret with all five JSON keys. Use real random values—never commit this file:
+Populate the secret with all six JSON keys. Use real random values—never commit this file:
 
 ```json
 {
+  "OPENAI_API_KEY": "replace-with-openai-project-key",
   "AGENT_API_TOKEN": "replace-with-agent-api-token",
   "AGENT_CALLBACK_TOKEN": "replace-with-a-long-random-value",
   "CARD_API_TOKEN": "replace-with-straitsx-card-api-token",

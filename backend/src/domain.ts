@@ -135,6 +135,18 @@ export interface Activity {
   archiveLines?: { name: string; seller: string; price: string }[];
 }
 
+/** Immutable, full-document checkpoint written for every persisted activity transition. */
+export interface ActivityCheckpoint {
+  checkpointId: string;
+  activityId: string;
+  userId: string;
+  reason: string;
+  createdAt: string;
+  stage: ActivityStage;
+  status: ActivityStatus;
+  activity: Activity;
+}
+
 export interface Wallet {
   balanceMinor: number;
   address: string;

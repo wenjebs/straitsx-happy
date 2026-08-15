@@ -1,9 +1,18 @@
 import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
-import type { Activity, Mandate, Profile, PurchaseRun, Settings, Wallet } from "../domain.js";
+import type {
+  Activity,
+  ActivityCheckpoint,
+  Mandate,
+  Profile,
+  PurchaseRun,
+  Settings,
+  Wallet,
+} from "../domain.js";
 import type { PurchaseClaim, Repository } from "../repository.js";
 
 export class MemoryRepository implements Repository {
   private readonly activities = new Map<string, Activity>();
+  private readonly activityCheckpoints = new Map<string, ActivityCheckpoint[]>();
   private readonly wallets = new Map<string, Wallet>();
   private readonly mandates = new Map<string, Mandate>();
   private readonly settings = new Map<string, Settings>();
@@ -23,8 +32,24 @@ export class MemoryRepository implements Repository {
     return activity ? structuredClone(activity) : null;
   }
 
-  async putActivity(activity: Activity): Promise<void> {
+  async putActivity(activity: Activity, reason = "activity.updated"): Promise<void> {
     this.activities.set(activity.id, structuredClone(activity));
+    const checkpoints = this.activityCheckpoints.get(activity.id) ?? [];
+    checkpoints.push({
+      checkpointId: crypto.randomUUID(),
+      activityId: activity.id,
+      userId: activity.userId,
+      reason,
+      createdAt: new Date().toISOString(),
+      stage: activity.stage,
+      status: activity.status,
+      activity: structuredClone(activity),
+    });
+    this.activityCheckpoints.set(activity.id, checkpoints);
+  }
+
+  async listActivityCheckpoints(activityId: string): Promise<ActivityCheckpoint[]> {
+    return structuredClone(this.activityCheckpoints.get(activityId) ?? []);
   }
 
   async getWallet(userId: string): Promise<Wallet> {

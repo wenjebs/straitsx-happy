@@ -9,7 +9,7 @@ import type {
 import { DEFAULT_USER_ID, formatMinor, newId } from "../domain.js";
 import { HttpError } from "../errors.js";
 import type { EventHub } from "../events.js";
-import type { AgentProvider } from "../providers/agent.js";
+import type { PlannerProvider, ScoutProvider } from "../providers/agent.js";
 import type { Repository } from "../repository.js";
 import type { AgentCallback } from "../schemas.js";
 
@@ -17,7 +17,8 @@ export class ActivityService {
   constructor(
     private readonly repository: Repository,
     private readonly events: EventHub,
-    private readonly agents: AgentProvider,
+    private readonly planner: PlannerProvider,
+    private readonly scouts: ScoutProvider,
   ) {}
 
   list(userId = DEFAULT_USER_ID): Promise<Activity[]> {
@@ -28,6 +29,11 @@ export class ActivityService {
     const activity = await this.repository.getActivity(id);
     if (!activity) throw new HttpError(404, `Activity ${id} was not found.`);
     return activity;
+  }
+
+  async history(id: string) {
+    await this.get(id);
+    return this.repository.listActivityCheckpoints(id);
   }
 
   async create(goal: string, userId = DEFAULT_USER_ID): Promise<Activity> {
@@ -71,9 +77,9 @@ export class ActivityService {
       totalMinor: 0,
     };
 
-    await this.repository.putActivity(activity);
+    await this.repository.putActivity(activity, "activity.created");
     try {
-      await this.agents.startPlanning(activity);
+      await this.planner.startPlanning(activity);
     } catch (error) {
       activity.status = "cancelled";
       activity.messages.push({
@@ -81,7 +87,7 @@ export class ActivityService {
         role: "assistant",
         text: error instanceof Error ? error.message : "The agent service could not start.",
       });
-      await this.repository.putActivity(activity);
+      await this.repository.putActivity(activity, "planning.failed");
       this.snapshot(activity);
       throw error;
     }
@@ -101,7 +107,7 @@ export class ActivityService {
       category: "General",
     };
     activity.wishlist.push(item);
-    await this.saveSnapshot(activity);
+    await this.saveSnapshot(activity, "wishlist.item_added");
     return activity;
   }
 
@@ -112,7 +118,7 @@ export class ActivityService {
     }
     activity.wishlist = activity.wishlist.filter((item) => item.id !== itemId);
     activity.clarifications = activity.clarifications.filter((row) => row.itemId !== itemId);
-    await this.saveSnapshot(activity);
+    await this.saveSnapshot(activity, "wishlist.item_removed");
     return activity;
   }
 
@@ -125,7 +131,7 @@ export class ActivityService {
     activity.messages.push({ id: newId("msg"), role: "user", text: "Looks right — go ahead." });
     const next = activity.clarifications.find((row) => !row.chosen);
     activity.messages.push(next ? this.curatorMessage(activity, next) : this.lockedMessage());
-    await this.saveSnapshot(activity);
+    await this.saveSnapshot(activity, "wishlist.approved");
     return activity;
   }
 
@@ -140,7 +146,7 @@ export class ActivityService {
     activity.messages.push({ id: newId("msg"), role: "user", text: optionName });
     const next = activity.clarifications.find((row) => !row.chosen);
     activity.messages.push(next ? this.curatorMessage(activity, next) : this.lockedMessage());
-    await this.saveSnapshot(activity);
+    await this.saveSnapshot(activity, "clarification.approved");
     return activity;
   }
 
@@ -172,11 +178,11 @@ export class ActivityService {
         }),
       ),
     );
-    await this.repository.putActivity(activity);
+    await this.repository.putActivity(activity, "search.dispatched");
     this.snapshot(activity);
 
     try {
-      await this.agents.dispatchSearch(activity);
+      await this.scouts.dispatchSearch(activity);
     } catch (error) {
       activity.stage = "curate";
       activity.searchPlaying = false;
@@ -185,7 +191,7 @@ export class ActivityService {
         role: "assistant",
         text: error instanceof Error ? error.message : "The search agents could not start.",
       });
-      await this.saveSnapshot(activity);
+      await this.saveSnapshot(activity, "search.dispatch_failed");
       throw error;
     }
     return activity;
@@ -193,9 +199,9 @@ export class ActivityService {
 
   async setSearchPaused(id: string, paused: boolean): Promise<Activity> {
     const activity = await this.requireStage(id, "search");
-    await this.agents.setSearchPaused(activity, paused);
+    await this.scouts.setSearchPaused(activity, paused);
     activity.searchPlaying = !paused;
-    await this.saveSnapshot(activity);
+    await this.saveSnapshot(activity, paused ? "search.paused" : "search.resumed");
     return activity;
   }
 
@@ -204,7 +210,7 @@ export class ActivityService {
     if (!activity.shortlist.some((pick) => pick.itemId === itemId)) {
       throw new HttpError(404, `No shortlist pick exists for item ${itemId}.`);
     }
-    await this.agents.rejectListing(activity, itemId);
+    await this.scouts.rejectListing(activity, itemId);
     activity.stage = "search";
     activity.searchPlaying = true;
     activity.shortlist = activity.shortlist.filter((pick) => pick.itemId !== itemId);
@@ -216,7 +222,7 @@ export class ActivityService {
       queued: false,
     };
     activity.itemProgress = this.upsert(activity.itemProgress, progress, (row) => row.itemId);
-    await this.repository.putActivity(activity);
+    await this.repository.putActivity(activity, "shortlist.rejected");
     this.events.emit(activity.id, { type: "item.progress", progress });
     this.snapshot(activity);
     return activity;
@@ -246,7 +252,7 @@ export class ActivityService {
           ...(userMessage ? [userMessage] : []),
           { id: newId("msg"), role: "assistant", text: event.reply, card: "wishlist" },
         ];
-        await this.saveSnapshot(activity);
+        await this.saveSnapshot(activity, "wishlist.prepared");
         break;
       }
       case "item.progress": {
@@ -259,7 +265,7 @@ export class ActivityService {
         if (current?.stage === progress.stage && current.queued === progress.queued)
           return activity;
         activity.itemProgress = this.upsert(activity.itemProgress, progress, (row) => row.itemId);
-        await this.repository.putActivity(activity);
+        await this.repository.putActivity(activity, "search.item_progress");
         this.events.emit(id, { type: "item.progress", progress });
         break;
       }
@@ -272,7 +278,7 @@ export class ActivityService {
         );
         if (existingIndex >= 0) activity.agents[existingIndex] = event.agent;
         else activity.agents.push(event.agent);
-        await this.repository.putActivity(activity);
+        await this.repository.putActivity(activity, "search.agent_updated");
         this.events.emit(id, { type: "agent.update", agent: event.agent });
         break;
       }
@@ -295,13 +301,13 @@ export class ActivityService {
         );
         activity.stage = "shortlist";
         activity.searchPlaying = false;
-        await this.saveSnapshot(activity);
+        await this.saveSnapshot(activity, "shortlist.prepared");
         break;
       }
       case "message.appended": {
         if (!activity.messages.some((message) => message.id === event.message.id)) {
           activity.messages.push(event.message);
-          await this.repository.putActivity(activity);
+          await this.repository.putActivity(activity, "chat.message_appended");
           this.events.emit(id, { type: "message.appended", message: event.message });
         }
         break;
@@ -310,7 +316,7 @@ export class ActivityService {
         activity.status = "cancelled";
         activity.searchPlaying = false;
         activity.messages.push({ id: newId("msg"), role: "assistant", text: event.message });
-        await this.saveSnapshot(activity);
+        await this.saveSnapshot(activity, "agent.failed");
         break;
       }
     }
@@ -381,8 +387,8 @@ export class ActivityService {
       : [...rows, next];
   }
 
-  private async saveSnapshot(activity: Activity): Promise<void> {
-    await this.repository.putActivity(activity);
+  private async saveSnapshot(activity: Activity, reason = "activity.updated"): Promise<void> {
+    await this.repository.putActivity(activity, reason);
     this.snapshot(activity);
   }
 

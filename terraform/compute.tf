@@ -91,7 +91,10 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "FRONTEND_ORIGIN", value = "https://${aws_cloudfront_distribution.app.domain_name}" },
       { name = "PUBLIC_BASE_URL", value = "https://${aws_cloudfront_distribution.app.domain_name}" },
-      { name = "AGENT_MODE", value = var.agent_api_base_url != "" ? "remote" : "disabled" },
+      { name = "PLANNER_MODE", value = "openai" },
+      { name = "OPENAI_MODEL", value = var.openai_model },
+      { name = "OPENAI_BASE_URL", value = "https://api.openai.com/v1" },
+      { name = "SCOUT_MODE", value = var.agent_api_base_url != "" ? "remote" : "disabled" },
       { name = "AGENT_API_BASE_URL", value = var.agent_api_base_url },
       { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : "disabled" },
       { name = "CARD_API_BASE_URL", value = var.card_api_base_url },
@@ -102,6 +105,10 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "PAYMENT_ATTEMPTS_PER_LISTING", value = tostring(var.payment_attempts_per_listing) }
     ]
     secrets = [
+      {
+        name      = "OPENAI_API_KEY"
+        valueFrom = "${aws_secretsmanager_secret.backend.arn}:OPENAI_API_KEY::"
+      },
       {
         name      = "AGENT_API_TOKEN"
         valueFrom = "${aws_secretsmanager_secret.backend.arn}:AGENT_API_TOKEN::"

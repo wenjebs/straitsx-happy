@@ -8,7 +8,7 @@ import type { Config } from "./config.js";
 import { type ActivityEvent, DEFAULT_USER_ID, formatMinor, newId } from "./domain.js";
 import { asMessage, HttpError } from "./errors.js";
 import type { EventHub } from "./events.js";
-import type { AgentProvider } from "./providers/agent.js";
+import type { PlannerProvider, ScoutProvider } from "./providers/agent.js";
 import type { CardProvider } from "./providers/card.js";
 import type { PurchaseAgentProvider } from "./providers/purchaseAgent.js";
 import type { Repository } from "./repository.js";
@@ -30,7 +30,8 @@ export interface AppDependencies {
   config: Config;
   repository: Repository;
   events: EventHub;
-  agents: AgentProvider;
+  planner: PlannerProvider;
+  scouts: ScoutProvider;
   cards: CardProvider;
   purchaseAgents: PurchaseAgentProvider;
   activities: ActivityService;
@@ -54,16 +55,19 @@ export function createApp(deps: AppDependencies): Hono {
     c.json({
       ok: true,
       dataStore: deps.config.DATA_STORE,
-      agentProvider: deps.agents.mode,
+      plannerProvider: deps.planner.mode,
+      scoutProvider: deps.scouts.mode,
       cardProvider: deps.cards.mode,
       purchaseAgentProvider: deps.purchaseAgents.mode,
       blockers: [
-        ...(deps.agents.mode === "disabled" ? ["AGENT_API_NOT_CONFIGURED"] : []),
+        ...(deps.planner.mode === "disabled" ? ["PLANNER_NOT_CONFIGURED"] : []),
+        ...(deps.scouts.mode === "disabled" ? ["SCOUT_API_NOT_CONFIGURED"] : []),
         ...(deps.cards.mode === "disabled" ? ["CARD_API_NOT_CONFIGURED"] : []),
         ...(deps.purchaseAgents.mode === "disabled" ? ["PURCHASE_AGENT_API_NOT_CONFIGURED"] : []),
       ],
       warnings: [
-        ...(deps.agents.mode === "local" ? ["LOCAL_SCOUT_FAILSAFE"] : []),
+        ...(deps.planner.mode === "local" ? ["LOCAL_PLANNER_FAILSAFE"] : []),
+        ...(deps.scouts.mode === "local" ? ["LOCAL_SCOUT_FAILSAFE"] : []),
         ...(deps.cards.mode === "local" ? ["LOCAL_CARD_FAILSAFE_NO_REAL_MONEY"] : []),
         ...(deps.purchaseAgents.mode === "local" ? ["LOCAL_CLOSER_FAILSAFE"] : []),
       ],
@@ -72,6 +76,9 @@ export function createApp(deps: AppDependencies): Hono {
 
   app.get("/v1/activities", async (c) => c.json(await deps.activities.list()));
   app.get("/v1/activities/:id", async (c) => c.json(await deps.activities.get(c.req.param("id"))));
+  app.get("/v1/activities/:id/checkpoints", async (c) =>
+    c.json(await deps.activities.history(c.req.param("id"))),
+  );
 
   app.post("/v1/activities", async (c) => {
     const body = await parseBody(c.req.raw, CreateActivityBody);
@@ -178,7 +185,7 @@ export function createApp(deps: AppDependencies): Hono {
   });
 
   app.get("/v1/dev/streams/:id", (c) => {
-    if (deps.agents.mode !== "local" && deps.purchaseAgents.mode !== "local") {
+    if (deps.scouts.mode !== "local" && deps.purchaseAgents.mode !== "local") {
       throw new HttpError(404, "Local stream failsafe is disabled.");
     }
     const label = escapeHtml(c.req.query("label") ?? "agent browser");

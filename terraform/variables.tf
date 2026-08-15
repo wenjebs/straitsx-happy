@@ -51,6 +51,12 @@ variable "agent_api_base_url" {
   default     = ""
 }
 
+variable "openai_model" {
+  description = "OpenAI model used by Happy's wishlist planner."
+  type        = string
+  default     = "gpt-5.6-luna"
+}
+
 variable "card_api_base_url" {
   description = "Remote StraitsX card API base URL. Leave empty until provided."
   type        = string

@@ -1,12 +1,20 @@
 import type { Activity } from "../domain.js";
 import { HttpError } from "../errors.js";
 
-export interface AgentProvider {
-  readonly mode: "local" | "remote" | "disabled";
+export interface PlannerProvider {
+  readonly mode: "local" | "remote" | "openai" | "disabled";
   startPlanning(activity: Activity): Promise<void>;
+}
+
+export interface ScoutProvider {
+  readonly mode: "local" | "remote" | "disabled";
   dispatchSearch(activity: Activity): Promise<void>;
   setSearchPaused(activity: Activity, paused: boolean): Promise<void>;
   rejectListing(activity: Activity, itemId: string): Promise<void>;
+}
+
+export interface AgentProvider extends PlannerProvider, ScoutProvider {
+  readonly mode: "local" | "remote" | "disabled";
 }
 
 interface LocalAgentOptions {

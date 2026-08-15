@@ -8,6 +8,7 @@ deploy_backend = false
 backend_image  = ""
 
 agent_api_base_url          = ""
+openai_model                = "gpt-5.6-luna"
 card_api_base_url           = ""
 purchase_agent_api_base_url = ""
 

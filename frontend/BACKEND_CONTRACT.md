@@ -192,6 +192,7 @@ All paths are relative to `VITE_API_BASE_URL`.
 |---|---|---|---|
 | `GET` | `/v1/activities` | — | `Activity[]` |
 | `GET` | `/v1/activities/:id` | — | `Activity` |
+| `GET` | `/v1/activities/:id/checkpoints` | — | `ActivityCheckpoint[]` |
 | `POST` | `/v1/activities` | `{ "goal": string }` | `Activity` |
 | `POST` | `/v1/activities/:id/wishlist/items` | `{ "name": string }` | `Activity` |
 | `DELETE` | `/v1/activities/:id/wishlist/items/:itemId` | — | `Activity` |
@@ -213,6 +214,11 @@ it as the running activity.
 `stage: "wishlist"` and the two opening messages already present (the user's
 goal, and an assistant message with `card: "thinking"`). Emit a snapshot over
 SSE when the real wishlist replaces the thinking state.
+
+The backend persists each transition as both the current activity document and an immutable full
+checkpoint. In particular, `wishlist.prepared` must commit before approval. The approval endpoint
+reloads that stored document and advances it to curation; it does not reuse an in-process planner
+result.
 
 `POST .../clarifications/:itemId` locks one option. When the last ambiguous item
 is resolved, append the assistant message with `card: "locked"` — that is what

@@ -1,4 +1,12 @@
-import type { Activity, Mandate, Profile, PurchaseRun, Settings, Wallet } from "./domain.js";
+import type {
+  Activity,
+  ActivityCheckpoint,
+  Mandate,
+  Profile,
+  PurchaseRun,
+  Settings,
+  Wallet,
+} from "./domain.js";
 
 export interface PurchaseClaim {
   claimed: boolean;
@@ -8,7 +16,8 @@ export interface PurchaseClaim {
 export interface Repository {
   listActivities(userId: string): Promise<Activity[]>;
   getActivity(id: string): Promise<Activity | null>;
-  putActivity(activity: Activity): Promise<void>;
+  putActivity(activity: Activity, reason?: string): Promise<void>;
+  listActivityCheckpoints(activityId: string): Promise<ActivityCheckpoint[]>;
 
   getWallet(userId: string): Promise<Wallet>;
   putWallet(userId: string, wallet: Wallet): Promise<void>;

@@ -8,9 +8,18 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  TransactWriteCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
-import type { Activity, Mandate, Profile, PurchaseRun, Settings, Wallet } from "../domain.js";
+import type {
+  Activity,
+  ActivityCheckpoint,
+  Mandate,
+  Profile,
+  PurchaseRun,
+  Settings,
+  Wallet,
+} from "../domain.js";
 import type { PurchaseClaim, Repository } from "../repository.js";
 
 interface Stored<T> {
@@ -62,15 +71,55 @@ export class DynamoRepository implements Repository {
     return item?.data ?? null;
   }
 
-  async putActivity(activity: Activity): Promise<void> {
-    await this.put<Stored<Activity>>({
+  async putActivity(activity: Activity, reason = "activity.updated"): Promise<void> {
+    const checkpoint: ActivityCheckpoint = {
+      checkpointId: crypto.randomUUID(),
+      activityId: activity.id,
+      userId: activity.userId,
+      reason,
+      createdAt: new Date().toISOString(),
+      stage: activity.stage,
+      status: activity.status,
+      activity,
+    };
+    const current: Stored<Activity> = {
       pk: `ACTIVITY#${activity.id}`,
       sk: "META",
       entity: "activity",
       data: activity,
       gsi1pk: `USER#${activity.userId}`,
       gsi1sk: `${activity.createdAt}#${activity.id}`,
-    });
+    };
+    const history: Stored<ActivityCheckpoint> = {
+      pk: `ACTIVITY#${activity.id}`,
+      sk: `CHECKPOINT#${checkpoint.createdAt}#${checkpoint.checkpointId}`,
+      entity: "activity-checkpoint",
+      data: checkpoint,
+    };
+    await this.document.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName: this.options.tableName, Item: current } },
+          { Put: { TableName: this.options.tableName, Item: history } },
+        ],
+      }),
+    );
+  }
+
+  async listActivityCheckpoints(activityId: string): Promise<ActivityCheckpoint[]> {
+    const result = await this.document.send(
+      new QueryCommand({
+        TableName: this.options.tableName,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+        ExpressionAttributeValues: {
+          ":pk": `ACTIVITY#${activityId}`,
+          ":prefix": "CHECKPOINT#",
+        },
+        ScanIndexForward: true,
+        ConsistentRead: true,
+      }),
+    );
+    return (result.Items ?? []).map((item) => (item as Stored<ActivityCheckpoint>).data);
   }
 
   async getWallet(userId: string): Promise<Wallet> {

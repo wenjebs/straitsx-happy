@@ -3,10 +3,11 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { EventHub } from "./events.js";
 import {
-  type AgentProvider,
   DisabledAgentProvider,
   LocalAgentProvider,
+  type PlannerProvider,
   RemoteAgentProvider,
+  type ScoutProvider,
 } from "./providers/agent.js";
 import {
   type CardProvider,
@@ -14,6 +15,7 @@ import {
   LocalCardProvider,
   RemoteCardProvider,
 } from "./providers/card.js";
+import { OpenAIPlannerProvider } from "./providers/openaiPlanner.js";
 import {
   DisabledPurchaseAgentProvider,
   LocalPurchaseAgentProvider,
@@ -29,19 +31,37 @@ import { PurchaseService } from "./services/purchases.js";
 const config = loadConfig();
 const repository: Repository = createRepository();
 const events = new EventHub();
-const agents: AgentProvider =
-  config.AGENT_MODE === "remote" && config.AGENT_API_BASE_URL
-    ? new RemoteAgentProvider({
-        baseUrl: config.AGENT_API_BASE_URL,
+const localAgents = new LocalAgentProvider({
+  callbackBaseUrl: config.PUBLIC_BASE_URL,
+  ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
+});
+const remoteAgents = config.AGENT_API_BASE_URL
+  ? new RemoteAgentProvider({
+      baseUrl: config.AGENT_API_BASE_URL,
+      callbackBaseUrl: config.PUBLIC_BASE_URL,
+      ...(config.AGENT_API_TOKEN ? { token: config.AGENT_API_TOKEN } : {}),
+      ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
+    })
+  : null;
+const planner: PlannerProvider =
+  config.PLANNER_MODE === "openai" && config.OPENAI_API_KEY
+    ? new OpenAIPlannerProvider({
+        apiKey: config.OPENAI_API_KEY,
+        model: config.OPENAI_MODEL,
+        baseUrl: config.OPENAI_BASE_URL,
         callbackBaseUrl: config.PUBLIC_BASE_URL,
-        ...(config.AGENT_API_TOKEN ? { token: config.AGENT_API_TOKEN } : {}),
         ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
       })
-    : config.AGENT_MODE === "local"
-      ? new LocalAgentProvider({
-          callbackBaseUrl: config.PUBLIC_BASE_URL,
-          ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
-        })
+    : config.PLANNER_MODE === "remote" && remoteAgents
+      ? remoteAgents
+      : config.PLANNER_MODE === "local"
+        ? localAgents
+        : new DisabledAgentProvider();
+const scouts: ScoutProvider =
+  config.SCOUT_MODE === "remote" && remoteAgents
+    ? remoteAgents
+    : config.SCOUT_MODE === "local"
+      ? localAgents
       : new DisabledAgentProvider();
 const cards: CardProvider =
   config.CARD_MODE === "remote" && config.CARD_API_BASE_URL
@@ -70,13 +90,14 @@ const purchaseAgents: PurchaseAgentProvider =
             : {}),
         })
       : new DisabledPurchaseAgentProvider();
-const activities = new ActivityService(repository, events, agents);
+const activities = new ActivityService(repository, events, planner, scouts);
 const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
 const app = createApp({
   config,
   repository,
   events,
-  agents,
+  planner,
+  scouts,
   cards,
   purchaseAgents,
   activities,
@@ -85,7 +106,7 @@ const app = createApp({
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, ({ port }) => {
   console.log(
-    `happy-backend http://127.0.0.1:${port} store=${config.DATA_STORE} scouts=${agents.mode} cards=${cards.mode} closer=${purchaseAgents.mode}`,
+    `happy-backend http://127.0.0.1:${port} store=${config.DATA_STORE} planner=${planner.mode} scouts=${scouts.mode} cards=${cards.mode} closer=${purchaseAgents.mode}`,
   );
 });
 
