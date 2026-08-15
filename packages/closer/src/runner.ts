@@ -62,8 +62,35 @@ export function createCloser(deps: CloserDeps) {
   const shipping = deps.shipping ?? DEFAULT_SHIPPING;
   const now = deps.now ?? (() => Date.now());
   const preIssueBudgetMs = deps.preIssueBudgetMs ?? 90_000;
+  const inFlight = new Map<string, Promise<RunResult>>();
 
+  /** The contract's rule (§6): the same key must never buy twice, on a rail with no refunds. */
   async function run(req: PurchaseRequest): Promise<RunResult> {
+    // Order matters: a live run's journal also says "running", so the in-flight check comes first.
+    const live = inFlight.get(req.activityId);
+    if (live) return live;
+
+    const prior = journal.read(req.activityId);
+    if (prior && prior.idempotencyKey !== req.idempotencyKey)
+      throw new Error(
+        `this activity has already been purchased (key ${prior.idempotencyKey}) — there are no refunds on this rail`,
+      );
+    if (prior?.result) return prior.result;
+    if (prior?.state === "running") {
+      // A crash left a run unfinished. Replaying it could mint a second card for the same item.
+      const stuck = prior.items.find((i) => i.state === "issuing" || i.state === "reserving");
+      const state = stuck?.purchaseId ? (await pay.getPurchase(stuck.purchaseId))?.state : "unknown";
+      throw new Error(
+        `activity ${req.activityId} has an unfinished run — ${stuck?.itemId ?? "an item"} is ${state}; resolve it before re-running`,
+      );
+    }
+
+    const p = execute(req).finally(() => inFlight.delete(req.activityId));
+    inFlight.set(req.activityId, p);
+    return p;
+  }
+
+  async function execute(req: PurchaseRequest): Promise<RunResult> {
     const startedAt = new Date(now()).toISOString();
     const rec: JournalRecord = {
       activityId: req.activityId,
