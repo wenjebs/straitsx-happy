@@ -3,9 +3,15 @@
 Takes chosen product URLs, drives a browser to each payment page, buys a single-use card for
 exactly that total through [`@happy/pay`](../pay/README.md), fills it in, and confirms the order.
 
-See it run — starts its own store, real browser, mock issuer, no money:
+See it run — starts its own store, opens a real browser window, mock issuer, no money:
 
     pnpm --filter @happy/closer demo
+
+| Variable | Default | Effect |
+|---|---|---|
+| `HEADLESS` | unset | `1` hides the browser window |
+| `DEMO_SLOWMO` | `500` | milliseconds between browser actions |
+| `DEMO_LINGER_MS` | `2500` | how long the confirmation page stays on screen |
 
 ## Use it
 

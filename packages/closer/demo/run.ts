@@ -31,8 +31,14 @@ process.env.CHAIN_ID ??= "43113";
 process.env.RPC_URL ??= "https://api.avax-test.network/ext/bc/C/rpc";
 process.env.XSGD_ADDRESS ??= "0xd769410dc8772695a7f55a304d2125320a65c2a5";
 
+// A window you can watch is the point of this script. slowMo spaces the clicks and the keystrokes
+// out; without it the whole run is over in under a second and there is nothing to see.
+// HEADLESS=1 turns the window off. DEMO_SLOWMO=0 runs it at full speed.
+const headless = process.env.HEADLESS === "1";
+const slowMo = Number(process.env.DEMO_SLOWMO ?? 500);
+
 const server = serve({ fetch: app.fetch, port: PORT });
-const browser = await chromium.launch();
+const browser = await chromium.launch({ headless, slowMo });
 
 await pay.createMandate({
   perItemCents: 3000,
@@ -41,8 +47,24 @@ await pay.createMandate({
   expiresAt: new Date(Date.now() + 86_400_000),
 });
 
+// The Closer closes each item's page as soon as the order lands, which is correct and leaves the
+// "Order confirmed" page on screen for a blink. Hold it open a moment instead — demo only, and it
+// needs no change in the runner, because BrowserLike is just { newPage() }.
+const linger = Number(process.env.DEMO_LINGER_MS ?? 2500);
+const watchable = {
+  async newPage() {
+    const page = await browser.newPage();
+    const close = page.close.bind(page);
+    page.close = async () => {
+      await page.waitForTimeout(linger).catch(() => {});
+      await close();
+    };
+    return page;
+  },
+};
+
 const closer = createCloser({
-  browser,
+  browser: headless ? browser : watchable,
   journal: { read: () => null, write: () => {} }, // a demo run never resumes
   onEvent: (e) => {
     if (e.type === "log.line") console.log(`  ${e.line.ts}  ${e.line.tag.padEnd(3)}  ${e.line.text}`);
@@ -50,7 +72,10 @@ const closer = createCloser({
   },
 });
 
-console.log(`\nISSUER=mock — no money moves. Buying two items from ${base}\n`);
+console.log(
+  `\nISSUER=mock — no money moves. Buying two items from ${base}` +
+    `\n${headless ? "headless" : "headed"} browser, slowMo ${slowMo}ms\n`,
+);
 const result = await closer.run({
   activityId: "act_demo",
   idempotencyKey: "demo-1",
