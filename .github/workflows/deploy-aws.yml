@@ -44,6 +44,9 @@ jobs:
       TF_VAR_funding_chain_id: ${{ vars.FUNDING_CHAIN_ID || '43113' }}
       TF_VAR_funding_rpc_url: ${{ vars.FUNDING_RPC_URL || 'https://api.avax-test.network/ext/bc/C/rpc' }}
       TF_VAR_xsgd_address: ${{ vars.XSGD_ADDRESS || '0xd769410dc8772695a7f55a304d2125320a65c2a5' }}
+      # mock exercises the whole rail without spending; straitsx mints a real single-use card.
+      TF_VAR_issuer_mode: ${{ vars.ISSUER_MODE || 'mock' }}
+      TF_VAR_straitsx_card_api_base: ${{ vars.STRAITSX_CARD_API_BASE || 'https://card.straitsx.ai/sandbox/cardapi' }}
       TF_VAR_funding_network_name: ${{ vars.FUNDING_NETWORK_NAME || 'Avalanche Fuji C-Chain' }}
       TF_VAR_funding_explorer_url: ${{ vars.FUNDING_EXPLORER_URL || 'https://subnets-test.avax.network/c-chain' }}
 
@@ -157,6 +160,7 @@ jobs:
           PURCHASE_AGENT_API_TOKEN: ${{ secrets.PURCHASE_AGENT_API_TOKEN }}
           PURCHASE_CALLBACK_TOKEN: ${{ secrets.PURCHASE_CALLBACK_TOKEN }}
           WALLET_AUTH_SECRET: ${{ secrets.WALLET_AUTH_SECRET }}
+          SPEND_PRIVATE_KEY: ${{ secrets.SPEND_PRIVATE_KEY }}
           BACKEND_SECRET_ARN: ${{ steps.infrastructure.outputs.secret_arn }}
         run: |
           set -euo pipefail
@@ -172,8 +176,19 @@ jobs:
             echo "WALLET_AUTH_SECRET must be at least 32 characters when FUNDING_MODE=chain." >&2
             exit 1
           fi
-          if [[ -n "$TF_VAR_purchase_agent_api_base_url" && -z "$PURCHASE_CALLBACK_TOKEN" ]]; then
-            echo "PURCHASE_CALLBACK_TOKEN is required when PURCHASE_AGENT_API_BASE_URL is set." >&2
+          # The Closer now runs as a sidecar on every deploy, so both of its tokens are mandatory:
+          # without them it refuses every job and its callbacks reach the backend unauthenticated.
+          if (( ${#PURCHASE_AGENT_API_TOKEN} < 32 )); then
+            echo "PURCHASE_AGENT_API_TOKEN must be a stable random secret of at least 32 characters." >&2
+            exit 1
+          fi
+          if (( ${#PURCHASE_CALLBACK_TOKEN} < 32 )); then
+            echo "PURCHASE_CALLBACK_TOKEN must be a stable random secret of at least 32 characters." >&2
+            exit 1
+          fi
+          # Only a real mint needs a spending key. ISSUER=mock spends nothing.
+          if [[ "$TF_VAR_issuer_mode" == "straitsx" && -z "$SPEND_PRIVATE_KEY" ]]; then
+            echo "SPEND_PRIVATE_KEY is required when ISSUER_MODE=straitsx." >&2
             exit 1
           fi
 
@@ -188,6 +203,7 @@ jobs:
             --arg purchase_api "$PURCHASE_AGENT_API_TOKEN" \
             --arg purchase_callback "$PURCHASE_CALLBACK_TOKEN" \
             --arg wallet_auth "$WALLET_AUTH_SECRET" \
+            --arg spend_key "$SPEND_PRIVATE_KEY" \
             '{
               OPENAI_API_KEY: $openai,
               AGENT_API_TOKEN: $agent_api,
@@ -195,7 +211,8 @@ jobs:
               CARD_API_TOKEN: $card_api,
               PURCHASE_AGENT_API_TOKEN: $purchase_api,
               PURCHASE_CALLBACK_TOKEN: $purchase_callback,
-              WALLET_AUTH_SECRET: $wallet_auth
+              WALLET_AUTH_SECRET: $wallet_auth,
+              SPEND_PRIVATE_KEY: $spend_key
             }' > "$secret_file"
           aws secretsmanager put-secret-value \
             --secret-id "$BACKEND_SECRET_ARN" \

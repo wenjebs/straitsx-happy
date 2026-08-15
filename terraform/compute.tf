@@ -99,14 +99,22 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "OPENAI_BASE_URL", value = "https://api.openai.com/v1" },
       { name = "SCOUT_MODE", value = var.agent_api_base_url != "" ? "remote" : "agentcore" },
       { name = "AGENT_API_BASE_URL", value = var.agent_api_base_url },
-      # Nothing serves the card or closer APIs yet, so a dev stack runs the mocks to keep the
-      # walkthrough whole. A prod stack still refuses to: it stays disabled until a real rail
-      # is configured, and ALLOW_MOCK_MONEY below is what lets the backend accept the mocks.
-      { name = "ALLOW_MOCK_MONEY", value = var.environment == "prod" ? "false" : "true" },
-      { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : (var.environment == "prod" ? "disabled" : "local") },
+      # The Closer runs as a sidecar in this same task, so the backend reaches it on loopback:
+      # awsvpc gives both containers one network namespace.
+      { name = "ALLOW_MOCK_MONEY", value = "false" },
+      { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : "straitsx" },
       { name = "CARD_API_BASE_URL", value = var.card_api_base_url },
-      { name = "PURCHASE_AGENT_MODE", value = var.purchase_agent_api_base_url != "" ? "remote" : (var.environment == "prod" ? "disabled" : "local") },
-      { name = "PURCHASE_AGENT_API_BASE_URL", value = var.purchase_agent_api_base_url },
+      { name = "PURCHASE_AGENT_MODE", value = "remote" },
+      { name = "PURCHASE_AGENT_API_BASE_URL", value = "http://127.0.0.1:4042" },
+      # @happy/pay's own configuration. ISSUER=straitsx mints a real card and requires
+      # SPEND_PRIVATE_KEY; left at mock the whole rail runs without spending anything.
+      { name = "ISSUER", value = var.issuer_mode },
+      { name = "CARD_API_BASE", value = var.straitsx_card_api_base },
+      { name = "ALLOWED_NETWORK", value = "eip155:${var.funding_chain_id}" },
+      { name = "CARDHOLDER_NAME", value = var.cardholder_name },
+      # Ephemeral, and that is a real limit: a task restart loses the purchase ledger, so
+      # reconciliation cannot recover a payment the dead task had in flight.
+      { name = "DATABASE_URL", value = "file:/tmp/happy.db" },
       { name = "FUNDING_MODE", value = var.funding_mode },
       { name = "HAPPY_WALLET_ADDRESS", value = var.happy_wallet_address },
       { name = "CHAIN_ID", value = tostring(var.funding_chain_id) },
@@ -148,6 +156,10 @@ resource "aws_ecs_task_definition" "backend" {
       {
         name      = "WALLET_AUTH_SECRET"
         valueFrom = "${aws_secretsmanager_secret.backend.arn}:WALLET_AUTH_SECRET::"
+      },
+      {
+        name      = "SPEND_PRIVATE_KEY"
+        valueFrom = "${aws_secretsmanager_secret.backend.arn}:SPEND_PRIVATE_KEY::"
       }
     ]
     logConfiguration = {
@@ -168,6 +180,50 @@ resource "aws_ecs_task_definition" "backend" {
       retries     = 3
       startPeriod = 20
     }
+    },
+    /*
+     * The Closer, alongside the backend rather than behind its own load balancer.
+     *
+     * It drives a remote AgentCore browser, so it needs no Chromium of its own and no inbound
+     * route: the only client is the backend on loopback, and the only egress is to AWS and the
+     * merchant. Its port is deliberately absent from the ALB target group — a public Closer would
+     * accept purchase jobs from anyone holding a guessed token.
+     */
+    {
+      name             = "closer"
+      image            = var.backend_image
+      essential        = false
+      command          = ["pnpm", "--filter", "@happy/closer", "service"]
+      workingDirectory = "/app"
+      environment = [
+        { name = "NODE_ENV", value = "production" },
+        { name = "CLOSER_SERVICE_PORT", value = "4042" },
+        { name = "CLOSER_PUBLIC_BASE_URL", value = "http://127.0.0.1:4042" },
+        # A real browser in Bedrock AgentCore, using this task's role for credentials.
+        { name = "CLOSER_BROWSER", value = "agentcore" },
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "OPENAI_MODEL", value = var.openai_model },
+        { name = "OPENAI_BASE_URL", value = "https://api.openai.com/v1" },
+        { name = "CARD_TYPE_DELAY_MS", value = "" }
+      ]
+      secrets = [
+        {
+          name      = "PURCHASE_AGENT_API_TOKEN"
+          valueFrom = "${aws_secretsmanager_secret.backend.arn}:PURCHASE_AGENT_API_TOKEN::"
+        },
+        {
+          name      = "OPENAI_API_KEY"
+          valueFrom = "${aws_secretsmanager_secret.backend.arn}:OPENAI_API_KEY::"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.backend.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "closer"
+        }
+      }
   }])
 
   tags = local.common_tags

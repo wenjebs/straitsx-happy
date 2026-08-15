@@ -122,7 +122,9 @@ export async function stopAllBrowsers(): Promise<number> {
 export async function browserForEnv(): Promise<BrowserLike> {
   if ((process.env.CLOSER_BROWSER ?? "local") === "agentcore") {
     const session = await startAgentCoreSession({
-      profile: process.env.AWS_PROFILE ?? "happy",
+      // On ECS there is no ini file: the task role must come from the ambient chain. A named
+      // profile is only for laptops, whose `default` is a Scaleway one.
+      ...(process.env.AWS_PROFILE ? { profile: process.env.AWS_PROFILE } : {}),
       region: process.env.AWS_REGION ?? "ap-southeast-1",
       name: "happy-purchase-run",
     });

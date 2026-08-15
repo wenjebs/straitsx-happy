@@ -160,3 +160,26 @@ variable "cloudfront_price_class" {
   type        = string
   default     = "PriceClass_200"
 }
+
+variable "issuer_mode" {
+  description = "@happy/pay issuer. straitsx mints a real single-use card and needs SPEND_PRIVATE_KEY; mock spends nothing."
+  type        = string
+  default     = "mock"
+
+  validation {
+    condition     = contains(["mock", "straitsx"], var.issuer_mode)
+    error_message = "issuer_mode must be mock or straitsx."
+  }
+}
+
+variable "straitsx_card_api_base" {
+  description = "StraitsX card API. The sandbox path issues testnet cards; production spends real money."
+  type        = string
+  default     = "https://card.straitsx.ai/sandbox/cardapi"
+}
+
+variable "cardholder_name" {
+  description = "Name embossed on the issued card."
+  type        = string
+  default     = "Happy Agent"
+}
