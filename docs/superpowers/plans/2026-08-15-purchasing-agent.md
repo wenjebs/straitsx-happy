@@ -260,9 +260,8 @@ export interface MerchantAdapter {
   /** The all-in total in cents, read from structured markup — never from merchant prose. */
   readFinalTotalCents(page: Page): Promise<number>;
   /** Handed to payWithCard as opts.confirm. Must return a real order reference or null; "probably
-   *  fine" is not an option. @happy/pay consults it BEFORE its decline check, so a pattern loose
-   *  enough to match "we could not process your order" marks a purchase DONE that never charged —
-   *  spec §5. */
+   *  fine" is not an option. Since fedc8bb the library settles an explicit decline first and never
+   *  consults confirm() on a declined page, but an adapter still owes positive evidence — spec §5. */
   confirmOrder?(page: Page): Promise<string | null>;
   /** Handed to payWithCard as opts.submitSelector when the library's form-scoped discovery is wrong. */
   submitSelector?: string;
@@ -2246,8 +2245,9 @@ describe("generic adapter", () => {
   }, 30_000);
 
   it("refuses to confirm a decline page that happens to say 'order'", async () => {
-    // @happy/pay consults confirm() before its own decline check, so a loose pattern here would
-    // mark a purchase DONE that never charged. This is the highest-consequence adapter test.
+    // The library settles declines before consulting confirm() (fedc8bb), so this is the second
+    // line of defence — but it is the one that survives a merchant whose decline page never says
+    // "declin", which is the case pay's own check cannot catch.
     const page = await browser.newPage();
     await page.setContent("<h1>Payment declined</h1><p>We could not process your order SG830142</p>");
     expect(await genericAdapter.confirmOrder?.(page)).toBeNull();
@@ -2324,8 +2324,8 @@ export const genericAdapter: MerchantAdapter = {
     return dollars * 100 + Number(match[2] ?? 0);
   },
 
-  // Handed to payWithCard as opts.confirm. @happy/pay consults it BEFORE its decline check, so
-  // this must demand positive evidence: a decline page says "we could not process your order".
+  // Handed to payWithCard as opts.confirm. The library settles declines first (fedc8bb), so this
+  // is defence in depth: demand positive evidence, because "order" alone appears on decline pages.
   async confirmOrder(page) {
     // Rendered text, not page.content(): markup carries uppercase tokens like UTF-8 that look
     // exactly like order numbers.

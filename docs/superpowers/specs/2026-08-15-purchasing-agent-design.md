@@ -418,12 +418,15 @@ Notes that matter:
 - **An unknown outcome is never reported as success** (invariant 8). `confirmOrder` is not a
   loophole: it is a second, adapter-specific *observation* of the same page, and it must return a
   real order reference or null. It may not return "probably fine".
-- **A sloppy `confirmOrder` is the one way an adapter can lose money silently.** `@happy/pay`
-  consults it *before* its decline check, so a regex loose enough to match a decline page — "we
-  could not process your **order**" — marks a purchase `DONE` that never charged, and the item is
-  reported as bought. Every `confirmOrder` must require positive evidence (a confirmation heading
-  **and** a reference-shaped token) and must be tested against a decline page, not only a success
-  page. Task 10 of the plan has that test; the demo-store adapter needs no `confirmOrder` at all.
+- **A sloppy `confirmOrder` is the way an adapter could lose money silently — and since fedc8bb the
+  library no longer lets it.** An explicit decline is settled *before* any caller strategy runs, and
+  `confirm()` is never consulted on a declined page, so a regex loose enough to match "we could not
+  process your **order**" can no longer mark a purchase `DONE` that never charged. That precedence
+  is the same class of rule as *unknown is a failure*, and it belongs in one place rather than in
+  every adapter's discipline. Adapters still owe positive evidence — a confirmation heading **and**
+  a reference-shaped token, with decline language rejected — as defence in depth, and must still be
+  tested against a decline page. Task 10 of the plan has that test; the demo-store adapter needs no
+  `confirmOrder` at all.
 - **Cancelling a finished purchase throws** (invariant 7), so `complete` and `cancel` are mutually
   exclusive on every path and never both attempted.
 - The card's ~10 minute TTL is not a reason to abandon anything. If more than 8 minutes have
@@ -567,8 +570,8 @@ Matches everything (registered last).
   (confirmed|placed)|thank you for your order/i`), rejects anything containing decline language,
   and then returns the first uppercase token of five or more characters that contains a digit.
   Anything less returns null. The heading pattern deliberately excludes bare "order", because a
-  decline page says "we could not process your order" and `@happy/pay` consults `confirm` *before*
-  its own decline check.
+  decline page says "we could not process your order". `@happy/pay` settles declines before it
+  consults `confirm` (fedc8bb), so this is the second line of defence rather than the only one.
 
 ### 8.3 What a real merchant would additionally need
 
