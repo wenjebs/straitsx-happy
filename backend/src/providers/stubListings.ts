@@ -15,48 +15,48 @@ export const CARD_MAX_MINOR = 3000;
 /**
  * Fixed listings, standing in for discovery.
  *
- * These are real Shopee listings for Suntory Roku gin. Two things about them are measured, not
- * guessed, and both mean a run against these will fail — visibly and for a stated reason, which is
- * the point of having them:
+ * Real Shopee listings, all priced inside the card's S$5-30 band so `issueCard` accepts them —
+ * an earlier set of gin listings at S$69-78 was refused by the payment rail before a browser ever
+ * opened, which is the range check doing its job.
  *
- *   1. Shopee blocks us. From an AWS datacentre IP these URLs return Shopee's "Page Unavailable"
- *      page — served AT the product URL rather than as a redirect, so a URL check alone reports
- *      success. Only a screenshot or a content check catches it. There is no captcha to solve, so
- *      the human-takeover path cannot rescue it either. See docs/agentcore-browser.md.
+ * The prices below are estimates. They could not be read from the pages, because Shopee refuses
+ * automated browsers: `probe/shopee-prices.ts` loads these URLs from a local Playwright browser on
+ * a residential connection and gets `/verify/traffic/error` — the same bounce AgentCore gets, on an
+ * IP where a hand-driven browser opens them fine. So the block is on the automation, not the
+ * network, and no proxy or datacentre change fixes it.
  *
- *   2. The price is above the card's ceiling. Roku 700ml sells around S$68-88, and the card cannot
- *      mint above S$30, so `issueCard` refuses with an HTTP 400 before a browser is ever opened.
- *
- * `overCardCeiling` marks the second problem explicitly so nobody spends an evening debugging a
- * purchase that was never going to be authorised.
+ * That has a consequence worth stating: a run against these reaches the Closer, opens a browser and
+ * fails at Shopee's block. It will not reach the merchant total check, so the estimated prices are
+ * never actually compared against a page. Point SCOUT_LISTINGS at demo-store for a run that
+ * completes.
  */
 export const STUB_LISTINGS: StubListing[] = [
   {
-    title: "Suntory Roku Gin 700ml",
+    title: "Red Bull Kratingdaeng Energy Drink 250ml, 24 cans",
     seller: "Shopee",
     rating: "4.9",
-    price: "S$78.00",
-    amountMinor: 7800,
-    why: "Japanese craft gin, 700ml as specified",
-    url: "https://shopee.sg/Suntory-Roku-Gin-700ml-i.1452684276.49504598629?extraParams=%7B%22display_model_id%22%3A325426050843%2C%22model_selection_logic%22%3A3%7D",
+    price: "S$28.00",
+    amountMinor: 2800,
+    why: "Thailand original, case of 24 — near the card ceiling but inside it",
+    url: "https://shopee.sg/Red-Bull-Kratingdaeng-Energy-Drink-250ml-Cans-Set-of-24-(Thailand-Origin)-i.1840063679.47111344816?extraParams=%7B%22display_model_id%22%3A360986618387%2C%22model_selection_logic%22%3A3%7D",
   },
   {
-    title: "Suntory Roku Japanese Gin 700ml",
+    title: "COSRX Salicylic Acid Daily Gentle Cleanser 150ml",
     seller: "Shopee",
     rating: "4.8",
-    price: "S$72.00",
-    amountMinor: 7200,
-    why: "Same product, different seller — cheaper",
-    url: "https://shopee.sg/Suntory-Roku-Japanese-Gin-700ml-i.1601446.18343343065?extraParams=%7B%22display_model_id%22%3A231877137377%2C%22model_selection_logic%22%3A2%7D",
+    price: "S$14.00",
+    amountMinor: 1400,
+    why: "BHA cleanser for acne-prone skin, official store",
+    url: "https://shopee.sg/-COSRX-OFFICIAL-Salicylic-Acid-Daily-Gentle-Cleanser-150ml-Salicylic-Acid-0.5-Tea-Tree-Leaf-Oil-0.2-Acne-Treatment-Cleanser-for-Acne-prone-Skin-BHA-Cleanser-i.116704504.1933154709?extraParams=%7B%22display_model_id%22%3A41877311728%2C%22model_selection_logic%22%3A3%7D",
   },
   {
-    title: "Roku Japanese Gin 700ml",
+    title: "IUIGA 1.8L Glass Baking Dish",
     seller: "Shopee",
     rating: "4.7",
-    price: "S$69.00",
-    amountMinor: 6900,
-    why: "Lowest listed price for the same bottle",
-    url: "https://shopee.sg/Roku-Japanese-Gin-700ml-i.469850887.9277155509?extraParams=%7B%22display_model_id%22%3A93394175812%2C%22model_selection_logic%22%3A3%7D",
+    price: "S$19.00",
+    amountMinor: 1900,
+    why: "Heat resistant, oven and microwave safe, detachable handles",
+    url: "https://shopee.sg/IUIGA-1.8L-Glass-Baking-Dish-Heat-Resistant-Oven-Microwave-Safe-Casserole-Roasting-Pan-with-Detachable-Handles-i.1250897527.40532646220?extraParams=%7B%22display_model_id%22%3A272789102721%2C%22model_selection_logic%22%3A3%7D",
   },
 ];
 
