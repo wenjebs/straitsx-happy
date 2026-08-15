@@ -222,24 +222,35 @@ question are now all answered on the real thing rather than a local stand-in.
 
 ### Merchants, measured rather than predicted
 
-| Site | Result |
-|---|---|
-| `example.com`, `openstreetmap.org`, `ipinfo.io` | fine |
-| **Nylon Coffee (Shopify)** | **fine, all the way to the card form.** No bot wall anywhere in the flow. |
-| **Google search** | **reCAPTCHA** — `/sorry/index`, "unusual traffic from your computer network". Solvable by a human in the live view; the session then continues on real results with cookies intact. This is the case AgentCore is built for. |
-| **Shopee SG** | **hard bounce.** Redirects to `/verify/traffic/error?…&is_logged_in=false`, rendering "Page Unavailable". |
+Five merchants launched simultaneously through `demo/agentcore-server.ts`, plus earlier one-offs.
+The distinction that matters is **not** blocked/allowed — it is whether a human at the live view
+has anything to *do*. A captcha is survivable; a bounce is not.
 
-The Shopee result is the important one, and it is worse than a captcha: there is **nothing to
-solve**. A human in the live view has no challenge to clear, so takeover does not rescue it. The
-datacentre IP is judged before any page logic runs, exactly as predicted.
+| Site | Result | Can a human rescue it? |
+|---|---|---|
+| **FairPrice** | **loads completely** — real storefront, live prices, no wall | not needed |
+| **Nylon Coffee** (Shopify) | **loads, all the way to the card form** | not needed |
+| `example.com`, `openstreetmap.org`, `ipinfo.io` | fine | — |
+| **Lazada** | **slider captcha** — "Please drag the slider to verify" | **yes** — drag it in the live view |
+| **Google search** | **reCAPTCHA** — `/sorry/index`, "unusual traffic from your computer network" | **yes** — cleared, session continued on real results with cookies intact |
+| **Shopee** | **hard bounce** → `/verify/traffic/error?…&is_logged_in=false`, "Page Unavailable" | **no** — nothing to solve |
+| **Amazon SG** | **soft bot block** → "Website Temporarily Unavailable" | **no** — nothing to solve |
 
-Two hints worth chasing before writing Shopee off: the bounce URL carries `is_logged_in=false`, and
-the only action the page offers is **Log In**. An authenticated session may well pass where an
-anonymous one does not — and the live view is precisely how an operator logs in without the
-password ever reaching the agent or a model prompt. Untested.
+So the three-way split is: some merchants do not care, some throw a challenge that a human clears
+in seconds, and some refuse without offering a door. Only the third group is actually lost, and it
+is a minority — which is a much better result than "Shopee will probably bounce it" implied.
+
+Shopee and Amazon are the only true losses, and both were already ruled out by
+`docs/merchant-shortlist.md` for an unrelated reason: they require an account, and account creation
+needs a code sent to a phone.
+
+One hint before writing Shopee off entirely: its bounce URL carries `is_logged_in=false`, and the
+only action the page offers is **Log In**. An authenticated session may pass where an anonymous one
+does not — and the live view is exactly how an operator logs in without the password ever reaching
+the agent or a model prompt. Untested.
 
 Egress IPs rotate within AWS Singapore across sessions (`54.179.94.175`, then `18.143.40.65`), so
-there is no single address to get allowlisted.
+there is no single address to get allowlisted, and a merchant cannot durably block one either.
 
 ## Guardrails — skip these and you leak the card or lose money
 

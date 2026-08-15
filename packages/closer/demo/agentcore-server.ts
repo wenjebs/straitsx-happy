@@ -1,5 +1,5 @@
 /**
- * A tiny control plane for the AgentCore browser, for the frontend's Browser Test tab.
+ * A control plane for several AgentCore browsers at once, for the frontend's Browser Test tab.
  *
  * WHY THIS EXISTS RATHER THAN AN IFRAME. The obvious way to show a remote browser in our own UI is
  * `<iframe src={liveViewUrl}>`. That does not work, and it is worth writing down why so nobody
@@ -8,17 +8,20 @@
  * liveview.ts), and the DCV web client that *can* speak to it is a licensed AWS download, not on
  * npm. So the only two ways to see that stream are the AWS console, or shipping the DCV SDK.
  *
- * What we do instead: drive the browser over the CDP connection we already hold, screenshot it,
- * and forward clicks and keystrokes back. That gives an interactive view we fully control, with no
- * new dependencies. It is lower fidelity than DCV — a poll, not a video stream — but it is enough
- * to prove the session works, and it is the same channel `payWithCard` uses.
+ * What we do instead: drive each browser over the CDP connection we already hold, screenshot it,
+ * and forward clicks and keystrokes back. Lower fidelity than DCV — a poll, not a video stream —
+ * but it is the same channel `payWithCard` uses, and it scales to a wall of them.
+ *
+ * WHY SEVERAL. Whether a merchant admits an AWS datacentre IP is the single biggest unknown left,
+ * and it is answered per merchant, not in general. Running five at once turns a slow serial
+ * question into one screenful.
  *
  * WHERE THE REAL HANDOFF LIVES. For an actual 3-D Secure challenge, use the AWS console live view,
- * not this. This server exposes `consoleUrl` for exactly that. The console gives a real keyboard at
- * the OS level, which is what a cross-origin 3DS iframe needs.
+ * not this. The console gives a real keyboard at the OS level, which is what a cross-origin 3DS
+ * iframe needs.
  *
- * SAFETY. This is test scaffolding for `ISSUER=mock`. Anything that renders the remote screen —
- * this included — shows a card number the instant it is typed. Never point it at a session that is
+ * SAFETY. Test scaffolding for `ISSUER=mock`. Anything that renders the remote screen — this
+ * included — shows a card number the instant it is typed. Never point it at a session that is
  * mid-card-entry, and never expose this port beyond localhost.
  *
  *   AWS_PROFILE=happy pnpm --filter @happy/closer exec tsx demo/agentcore-server.ts
@@ -30,28 +33,41 @@ import { type AgentCoreSession, startAgentCoreSession } from "../src/agentcore.j
 const PORT = Number(process.env.AGENTCORE_TEST_PORT ?? 4041);
 const REGION = process.env.AWS_REGION ?? "ap-southeast-1";
 const ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:4040";
-
-type State = {
-  session: AgentCoreSession | null;
-  page: Page | null;
-  startedAt: string | null;
-  lastError: string | null;
-};
-
-const state: State = { session: null, page: null, startedAt: null, lastError: null };
+const MAX_SLOTS = Number(process.env.AGENTCORE_MAX_SLOTS ?? 6);
 
 const consoleUrl = `https://${REGION}.console.aws.amazon.com/bedrock-agentcore/home?region=${REGION}`;
 
 /**
- * Fallback only. The session reports 1456x819, but a screenshot comes back 1456x732 — the browser's
- * own chrome eats the difference. Mapping a click through the reported figure puts it ~10% too low,
- * so `status()` reads the live `innerWidth/innerHeight` instead and only falls back to this.
+ * The merchants worth asking about, from docs/merchant-shortlist.md. The marketplaces are the
+ * interesting ones — they are where a datacentre IP is most likely to be judged — and Nylon is
+ * the control, already proven to admit us all the way to a Shopify card form.
  */
-const VIEWPORT_FALLBACK = { width: 1456, height: 732 };
-let viewport = VIEWPORT_FALLBACK;
+const PRESETS = [
+  { label: "Shopee", url: "https://shopee.sg/" },
+  { label: "Lazada", url: "https://www.lazada.sg/" },
+  { label: "Amazon SG", url: "https://www.amazon.sg/" },
+  { label: "FairPrice", url: "https://www.fairprice.com.sg/" },
+  { label: "Nylon (control)", url: "https://nylon.coffee/collections/all" },
+];
 
-async function refreshViewport(page: Page) {
-  viewport = await page
+/** Fallback only; each slot reads its real innerWidth/innerHeight after every navigation. */
+const VIEWPORT_FALLBACK = { width: 1456, height: 732 };
+
+type Slot = {
+  id: string;
+  label: string;
+  session: AgentCoreSession;
+  page: Page;
+  startedAt: string;
+  viewport: { width: number; height: number };
+  lastError: string | null;
+};
+
+const slots = new Map<string, Slot>();
+let counter = 0;
+
+async function refreshViewport(slot: Slot) {
+  slot.viewport = await slot.page
     .evaluate(() => {
       // `globalThis` rather than `window`: this file is typechecked with Node's libs, which have no
       // DOM. The function body still runs in the page, where the two are the same object.
@@ -61,148 +77,80 @@ async function refreshViewport(page: Page) {
     .catch(() => VIEWPORT_FALLBACK);
 }
 
-function send(res: ServerResponse, status: number, body: unknown) {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json",
-    "access-control-allow-origin": ORIGIN,
-    "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-  });
-  res.end(payload);
-}
-
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function status() {
+function slotStatus(slot: Slot) {
   return {
-    running: state.session !== null,
-    sessionId: state.session?.sessionId ?? null,
-    startedAt: state.startedAt,
-    url: state.page?.url() ?? null,
-    viewport,
-    consoleUrl,
-    lastError: state.lastError,
+    id: slot.id,
+    label: slot.label,
+    sessionId: slot.session.sessionId,
+    startedAt: slot.startedAt,
+    url: slot.page.url(),
+    viewport: slot.viewport,
+    lastError: slot.lastError,
   };
 }
 
-async function start(startUrl: string) {
-  if (state.session) return status();
-  state.lastError = null;
+function listStatus() {
+  return {
+    consoleUrl,
+    maxSlots: MAX_SLOTS,
+    presets: PRESETS,
+    sessions: [...slots.values()].map(slotStatus),
+  };
+}
+
+async function startSlot(label: string, url: string) {
+  if (slots.size >= MAX_SLOTS) throw new Error(`at most ${MAX_SLOTS} sessions at once`);
+  const id = `s${++counter}`;
   const session = await startAgentCoreSession({
     profile: process.env.AWS_PROFILE ?? "happy",
     region: REGION,
     sessionTimeoutSeconds: Number(process.env.AGENTCORE_SESSION_SECONDS ?? 1800),
-    name: "happy-browser-test",
+    name: `happy-test-${id}`,
   });
-  state.session = session;
-  state.startedAt = new Date().toISOString();
-  state.page = await session.newPage();
-  if (startUrl) {
-    await state.page
-      .goto(startUrl, { waitUntil: "domcontentloaded", timeout: 45_000 })
-      .catch((e) => {
-        state.lastError = `navigation failed: ${e.message}`;
-      });
+  const page = await session.newPage();
+  const slot: Slot = {
+    id,
+    label,
+    session,
+    page,
+    startedAt: new Date().toISOString(),
+    viewport: VIEWPORT_FALLBACK,
+    lastError: null,
+  };
+  slots.set(id, slot);
+
+  if (url) {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch((e) => {
+      // A merchant that refuses us is the finding, not a crash. Keep the slot so its bounce page
+      // can be screenshotted and read.
+      slot.lastError = `navigation failed: ${e.message}`;
+    });
   }
-  await refreshViewport(state.page);
-  return status();
+  await refreshViewport(slot);
+  return slotStatus(slot);
 }
 
-async function stop() {
-  const session = state.session;
-  state.session = null;
-  state.page = null;
-  state.startedAt = null;
+async function stopSlot(id: string) {
+  const slot = slots.get(id);
+  if (!slot) return listStatus();
+  slots.delete(id);
   // Stop explicitly rather than letting the TTL run out — the TTL is billed.
-  if (session) await session.close().catch(() => {});
-  return status();
+  await slot.session.close().catch(() => {});
+  return listStatus();
 }
 
-/** Every action needs a live page; saying so once beats eight identical guards. */
-function requirePage(): Page {
-  if (!state.page) throw new Error("no session — start one first");
-  return state.page;
+async function stopAll() {
+  await Promise.all([...slots.keys()].map((id) => stopSlot(id)));
+  return listStatus();
 }
 
-const routes: Record<string, (body: Record<string, unknown>) => Promise<unknown>> = {
-  "POST /start": (b) => start(String(b.url ?? "https://example.com/")),
-  "POST /stop": () => stop(),
+function requireSlot(id: string | undefined): Slot {
+  const slot = id ? slots.get(id) : undefined;
+  if (!slot) throw new Error(`no session ${id}`);
+  return slot;
+}
 
-  "POST /navigate": async (b) => {
-    const page = requirePage();
-    await page.goto(String(b.url), { waitUntil: "domcontentloaded", timeout: 45_000 });
-    await refreshViewport(page);
-    return status();
-  },
-
-  "POST /click": async (b) => {
-    const page = requirePage();
-    await page.mouse.click(Number(b.x), Number(b.y));
-    return status();
-  },
-
-  // Typed, not filled — the same reason payWithCard types: instant entry with no keystrokes is a
-  // named fraud signal, and this tab exists to rehearse the real path.
-  "POST /type": async (b) => {
-    const page = requirePage();
-    await page.keyboard.type(String(b.text), { delay: 40 });
-    return status();
-  },
-
-  "POST /key": async (b) => {
-    const page = requirePage();
-    await page.keyboard.press(String(b.key));
-    return status();
-  },
-
-  "POST /scroll": async (b) => {
-    const page = requirePage();
-    await page.mouse.wheel(0, Number(b.dy ?? 0));
-    return status();
-  },
-
-  /** Click by accessible name. Blind coordinates do not survive a real storefront's layout. */
-  "POST /clickText": async (b) => {
-    const page = requirePage();
-    const name = new RegExp(String(b.text), "i");
-    const target = page.getByRole("button", { name }).or(page.getByRole("link", { name })).first();
-    await target.click({ timeout: Number(b.timeout ?? 15_000) });
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await refreshViewport(page);
-    return status();
-  },
-
-  /** Fill a field by selector, searching child frames — same traversal as payWithCard. */
-  "POST /fillField": async (b) => {
-    const page = requirePage();
-    const sel = String(b.selector);
-    for (const scope of [page, ...page.frames().filter((f) => f !== page.mainFrame())]) {
-      const el = scope.locator(sel).first();
-      if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
-        await el.click();
-        await el.pressSequentially(String(b.value), { delay: 40 });
-        return { ...status(), filled: true, selector: sel };
-      }
-    }
-    return { ...status(), filled: false, selector: sel };
-  },
-};
-
-/**
- * Reports whether a real checkout's card fields are reachable, using exactly the selectors and the
- * frame traversal `payWithCard` uses. Read-only: it finds and reports, it never types and never
- * submits. This is the question the whole AgentCore plan rests on, asked against a live merchant.
- */
+/** The selectors payWithCard uses, duplicated here so the report matches the real thing exactly. */
 const CARD_SELECTORS: Record<string, string[]> = {
   number: [
     'input[autocomplete="cc-number"]',
@@ -220,8 +168,9 @@ const CARD_SELECTORS: Record<string, string[]> = {
   name: ['input[autocomplete="cc-name"]', 'input[name*="cardholder" i]', 'input[name="name"]'],
 };
 
-async function cardFieldReport() {
-  const page = requirePage();
+/** Read-only: finds and reports card fields, never types and never submits. */
+async function cardFieldReport(slot: Slot) {
+  const page = slot.page;
   const children = page.frames().filter((f) => f !== page.mainFrame());
   const found: Record<string, { selector: string; frame: string } | null> = {};
 
@@ -231,7 +180,10 @@ async function cardFieldReport() {
       for (const [i, scope] of [page, ...children].entries()) {
         const el = scope.locator(sel).first();
         if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
-          found[field] = { selector: sel, frame: i === 0 ? "main" : (children[i - 1]?.url() ?? "?") };
+          found[field] = {
+            selector: sel,
+            frame: i === 0 ? "main" : (children[i - 1]?.url() ?? "?"),
+          };
           break;
         }
       }
@@ -254,19 +206,118 @@ async function cardFieldReport() {
   };
 }
 
+// --- per-slot actions ---------------------------------------------------------------------------
+
+const actions: Record<string, (slot: Slot, b: Record<string, unknown>) => Promise<unknown>> = {
+  navigate: async (slot, b) => {
+    await slot.page.goto(String(b.url), { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await refreshViewport(slot);
+    return slotStatus(slot);
+  },
+  click: async (slot, b) => {
+    await slot.page.mouse.click(Number(b.x), Number(b.y));
+    return slotStatus(slot);
+  },
+  // Typed, not filled — the same reason payWithCard types: instant entry with no keystrokes is a
+  // named fraud signal, and this tab exists to rehearse the real path.
+  type: async (slot, b) => {
+    await slot.page.keyboard.type(String(b.text), { delay: 40 });
+    return slotStatus(slot);
+  },
+  key: async (slot, b) => {
+    await slot.page.keyboard.press(String(b.key));
+    return slotStatus(slot);
+  },
+  scroll: async (slot, b) => {
+    await slot.page.mouse.wheel(0, Number(b.dy ?? 0));
+    return slotStatus(slot);
+  },
+  /** Click by accessible name. Blind coordinates do not survive a real storefront's layout. */
+  clickText: async (slot, b) => {
+    const name = new RegExp(String(b.text), "i");
+    const target = slot.page
+      .getByRole("button", { name })
+      .or(slot.page.getByRole("link", { name }))
+      .first();
+    await target.click({ timeout: Number(b.timeout ?? 15_000) });
+    await slot.page.waitForLoadState("domcontentloaded").catch(() => {});
+    await refreshViewport(slot);
+    return slotStatus(slot);
+  },
+  /** Fill by selector, searching child frames — the same traversal as payWithCard. */
+  fillField: async (slot, b) => {
+    const sel = String(b.selector);
+    const page = slot.page;
+    for (const scope of [page, ...page.frames().filter((f) => f !== page.mainFrame())]) {
+      const el = scope.locator(sel).first();
+      if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
+        await el.click();
+        await el.pressSequentially(String(b.value), { delay: 40 });
+        return { ...slotStatus(slot), filled: true, selector: sel };
+      }
+    }
+    return { ...slotStatus(slot), filled: false, selector: sel };
+  },
+  stop: (slot) => stopSlot(slot.id),
+};
+
+// --- http ---------------------------------------------------------------------------------------
+
+function send(res: ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "access-control-allow-origin": ORIGIN,
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+  });
+  res.end(JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  if (chunks.length === 0) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
 const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(res, 204, {});
 
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-  const key = `${req.method} ${url.pathname}`;
+  const parts = url.pathname.split("/").filter(Boolean);
 
   try {
-    if (key === "GET /status") return send(res, 200, status());
-    if (key === "GET /cardfields") return send(res, 200, await cardFieldReport());
+    // GET /sessions
+    if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
+      return send(res, 200, listStatus());
+    }
 
-    if (key === "GET /screenshot") {
-      const page = requirePage();
-      const buf = await page.screenshot({ type: "jpeg", quality: 55 });
+    // POST /sessions            {label,url}
+    // POST /sessions/launchAll  starts every preset at once
+    // POST /sessions/stopAll
+    if (req.method === "POST" && parts[0] === "sessions" && parts.length <= 2) {
+      const body = await readJson(req);
+      if (parts[1] === "stopAll") return send(res, 200, await stopAll());
+      if (parts[1] === "launchAll") {
+        // Started concurrently: five serial cold starts is a minute of staring at nothing.
+        const chosen = PRESETS.slice(0, Math.min(PRESETS.length, MAX_SLOTS - slots.size));
+        await Promise.allSettled(chosen.map((p) => startSlot(p.label, p.url)));
+        return send(res, 200, listStatus());
+      }
+      if (parts.length === 1) {
+        await startSlot(String(body.label ?? "session"), String(body.url ?? "https://example.com/"));
+        return send(res, 200, listStatus());
+      }
+    }
+
+    // GET /sessions/:id/screenshot
+    if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "screenshot") {
+      const slot = requireSlot(parts[1]);
+      const buf = await slot.page.screenshot({ type: "jpeg", quality: 50 });
       res.writeHead(200, {
         "content-type": "image/jpeg",
         "cache-control": "no-store",
@@ -275,20 +326,34 @@ const server = createServer(async (req, res) => {
       return res.end(buf);
     }
 
-    const handler = routes[key];
-    if (!handler) return send(res, 404, { error: `no route ${key}` });
-    return send(res, 200, await handler(await readJson(req)));
+    // GET /sessions/:id/cardfields
+    if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "cardfields") {
+      return send(res, 200, await cardFieldReport(requireSlot(parts[1])));
+    }
+
+    // POST /sessions/:id/:action
+    if (req.method === "POST" && parts[0] === "sessions" && parts.length === 3) {
+      const slot = requireSlot(parts[1]);
+      const action = actions[parts[2] ?? ""];
+      if (!action) return send(res, 404, { error: `no action ${parts[2]}` });
+      try {
+        return send(res, 200, await action(slot, await readJson(req)));
+      } catch (e) {
+        slot.lastError = (e as Error).message;
+        return send(res, 400, { error: slot.lastError, ...slotStatus(slot) });
+      }
+    }
+
+    return send(res, 404, { error: `no route ${req.method} ${url.pathname}` });
   } catch (e) {
-    const message = (e as Error).message;
-    state.lastError = message;
-    return send(res, 400, { error: message, ...status() });
+    return send(res, 400, { error: (e as Error).message });
   }
 });
 
-// Never leave a session billing because the process died.
+// Never leave sessions billing because the process died.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
-    stop()
+    stopAll()
       .catch(() => {})
       .finally(() => process.exit(0));
   });
@@ -297,4 +362,5 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`agentcore test server  http://127.0.0.1:${PORT}   (CORS: ${ORIGIN})`);
   console.log(`console live view     ${consoleUrl}`);
+  console.log(`presets               ${PRESETS.map((p) => p.label).join(", ")}`);
 });
