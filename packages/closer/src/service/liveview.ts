@@ -105,7 +105,19 @@ export function createLiveView(): LiveView {
       c.clients.add(res);
       // A viewer who joins mid-blank must see the blank, not the last frame before it.
       if (c.blanked) res.write("event: blank\ndata: card entry in progress\n\n");
-      res.on("close", () => c.clients.delete(res));
+      /*
+       * A comment line every ten seconds, which EventSource ignores.
+       *
+       * Frames are not a heartbeat: they stop whenever the page is still, and they stop entirely
+       * while the view is blanked for card entry. A CDN between the browser and here drops an
+       * origin connection that goes quiet — CloudFront does it at thirty seconds — so without
+       * this the live tile dies exactly during the payment it exists to show.
+       */
+      const keepalive = setInterval(() => res.write(": keepalive\n\n"), 10_000);
+      res.on("close", () => {
+        clearInterval(keepalive);
+        c.clients.delete(res);
+      });
     },
 
     push(attemptId, jpegBase64) {
