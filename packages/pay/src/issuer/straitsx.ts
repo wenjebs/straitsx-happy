@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { minorToAmountSgd } from "@happy/shared";
 import type { Config } from "../config.js";
 import type { TokenBucket } from "../x402/bucket.js";
@@ -31,6 +32,7 @@ export class StraitsXIssuer implements IssuerAdapter {
     private readonly account: Account,
     private readonly bucket: TokenBucket,
     private readonly fetchImpl: Fetch = fetch,
+    private readonly onRailStatus?: (status: "OK" | "RATE_LIMITED" | "ERROR") => void,
   ) {}
 
   private url() {
@@ -46,18 +48,29 @@ export class StraitsXIssuer implements IssuerAdapter {
     });
   }
 
-  private async post(body: string, envelope?: string) {
-    if (!this.bucket.take()) throw new X402Error("RATE_LIMITED", "local rail budget exhausted");
-    const res = await this.fetchImpl(this.url(), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(envelope ? { "PAYMENT-SIGNATURE": envelope } : {}),
-      },
-      body,
-    });
+  private async post(body: string, envelope?: string, checkBucket = true) {
+    if (checkBucket && !this.bucket.take())
+      throw new X402Error("RATE_LIMITED", "local rail budget exhausted");
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.url(), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(envelope ? { "PAYMENT-SIGNATURE": envelope } : {}),
+        },
+        body,
+      });
+    } catch (err) {
+      this.onRailStatus?.("ERROR");
+      throw err;
+    }
     const text = await res.text(); // 400/429 bodies are plain text
-    if (res.status === 429) throw new X402Error("RATE_LIMITED", text.slice(0, 200));
+    if (res.status === 429) {
+      this.onRailStatus?.("RATE_LIMITED");
+      throw new X402Error("RATE_LIMITED", text.slice(0, 200));
+    }
+    this.onRailStatus?.("OK");
     return { res, text };
   }
 
@@ -69,6 +82,13 @@ export class StraitsXIssuer implements IssuerAdapter {
       this.cfg.minCardCents,
       this.cfg.maxCardCents,
     );
+
+    // Reserve the paid leg's token now, before anything is signed or committed. By the time
+    // send() runs the envelope is signed and the payment row is already written — refusing to
+    // transmit it at that point would freeze real money mid-demo for nothing. send() itself
+    // bypasses the bucket entirely; failing here (before signing) is the only safe place to
+    // enforce the budget.
+    if (!this.bucket.take()) throw new X402Error("RATE_LIMITED", "local rail budget exhausted");
 
     const probe = await this.post(this.body(req));
     if (probe.res.status !== 402) {
@@ -96,20 +116,37 @@ export class StraitsXIssuer implements IssuerAdapter {
    * recovered: the nonce is consumed on-chain, so a duplicate can never settle twice.
    */
   async send(req: IssueRequest, prepared: PreparedPayment): Promise<IssueResult> {
-    const paid = await this.post(this.body(req), prepared.envelope);
+    // The token for this leg was already reserved in prepare() — do not gate the paid POST on
+    // the bucket, since the envelope is signed and the payment row committed by now.
+    const paid = await this.post(this.body(req), prepared.envelope, false);
+
+    // Nobody has ever seen a real 200 body from this endpoint, so the parsing below is two
+    // guessed regexes over an unconfirmed shape. Dump the raw text to disk before touching it —
+    // if the guesses are wrong, this file is the difference between money silently lost and
+    // money spent with the digits recoverable by a human.
+    try {
+      writeFileSync(`./card-response-${Date.now()}.json`, paid.text);
+    } catch {
+      // best effort only — never let a disk failure block issuance
+    }
+
     if (!paid.res.ok)
       throw new X402Error("REJECTED", `${paid.res.status}: ${paid.text.slice(0, 300)}`);
 
     const card = JSON.parse(paid.text) as {
-      card_opaque_id: string;
+      card_opaque_id?: string;
+      id?: string;
       settlement_tx: string | null;
       card_html?: string;
     };
-    if (card.card_html) this.captureMaterial(card.card_opaque_id, card.card_html);
+    // The real key name is unconfirmed — never let it come back undefined, or the ledger write
+    // (better-sqlite3 binding a param) throws after the money has already left.
+    const opaqueId = String(card.card_opaque_id ?? card.id ?? prepared.nonce);
+    if (card.card_html) this.captureMaterial(opaqueId, card.card_html);
 
     return {
-      opaqueId: card.card_opaque_id,
-      last4: this.material.get(card.card_opaque_id)?.pan.slice(-4) ?? null,
+      opaqueId,
+      last4: this.material.get(opaqueId)?.pan.slice(-4) ?? null,
       expiresAt: null,
       settlementTx: card.settlement_tx ?? null,
     };

@@ -17,6 +17,9 @@ build/
 *.sqlite
 *.sqlite3
 
+# raw issuer responses — may contain card material, never commit
+card-response-*.json
+
 # research scratch / third-party docs — not ours to republish
 research-raw.json
 StraitsX-docs.pdf

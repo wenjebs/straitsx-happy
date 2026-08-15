@@ -35,17 +35,27 @@ export async function resolvePending(deps: ReconDeps) {
       // The money left but we never saw the card. Replaying the stored envelope is safe —
       // the nonce is spent on-chain, so this can only return the card, never pay again.
       let recovered: Awaited<ReturnType<NonNullable<ReconDeps["issuer"]>["send"]>> | null = null;
+      let replayFailed = false;
       if (deps.issuer && p.envelope) {
-        recovered = await deps.issuer
-          .send(
+        try {
+          recovered = await deps.issuer.send(
             {
               amountCents: p.amount_cents,
               cardholderName: deps.cfg.cardholderName,
               idempotencyKey: p.purchase_id,
             },
             { nonce: p.nonce, envelope: p.envelope, validBeforeMs: Date.parse(p.valid_before) },
-          )
-          .catch(() => null);
+          );
+        } catch {
+          replayFailed = true;
+        }
+      }
+      if (replayFailed) {
+        // A transient failure (429, dropped socket, unparsable JSON) is not proof the card
+        // doesn't exist. Leave the payment PENDING and write nothing — the next tick retries
+        // the replay. Converging late is better than converging wrong (STRANDED is terminal).
+        unresolved++;
+        continue;
       }
       db.tx((t) => {
         t.raw

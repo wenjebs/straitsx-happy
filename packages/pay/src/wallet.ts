@@ -7,7 +7,14 @@ const AUTH_ABI = parseAbi(["function authorizationState(address,bytes32) view re
 export type ChainView = { balanceCents: Cents; ageMs: number };
 
 export function makeWallet(cfg: Config) {
-  const account = cfg.spendPrivateKey ? privateKeyToAccount(cfg.spendPrivateKey) : null;
+  // Mock mode is defined by cfg.issuer, not merely by whether a key happens to be set — a key
+  // left over from rehearsal in .env must not make an offline (ISSUER=mock) demo spend against
+  // the real chain balance. index.ts's own mock-ness check (`cfg.issuer === 'mock' || !cfg.spendPrivateKey`)
+  // must agree with this.
+  const account =
+    cfg.issuer === "straitsx" && cfg.spendPrivateKey
+      ? privateKeyToAccount(cfg.spendPrivateKey)
+      : null;
   const client = createPublicClient({ transport: http(cfg.rpcUrl) });
   let cache: { cents: Cents; at: number } = { cents: 0, at: 0 };
   let timer: NodeJS.Timeout | null = null;

@@ -1,6 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StraitsXIssuer } from "../src/issuer/straitsx.js";
 import { TokenBucket } from "../src/x402/bucket.js";
+
+// send() dumps the raw rail response to ./card-response-<ts>.json before parsing it (see
+// straitsx.ts) — every test that calls send() leaves one of these behind. Sweep them up so
+// the working tree stays clean; they are gitignored regardless.
+function sweepCardResponseFiles(): string[] {
+  const files = readdirSync(".").filter((f) => f.startsWith("card-response-"));
+  for (const f of files) rmSync(f, { force: true });
+  return files;
+}
 
 // 1800 cents === S$18.00 === 18_000_000 atomic units (XSGD is 6dp).
 // validateChallenge asserts exactly this relationship, so the fixture must hold it.
@@ -35,6 +45,7 @@ describe("StraitsXIssuer", () => {
   // signTypedData is a module-level vi.fn(); without this, call history leaks between cases
   // and the no-new-nonce assertion below silently inspects the wrong calls.
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => sweepCardResponseFiles());
 
   it("probes, signs, and pays with the envelope", async () => {
     const calls: any[] = [];
@@ -123,5 +134,96 @@ describe("StraitsXIssuer", () => {
     expect(account.signTypedData).not.toHaveBeenCalled(); // no new nonce was ever signed
     expect(fetchImpl).toHaveBeenCalledTimes(1); // no probe, just the paid POST
     expect(r.opaqueId).toBe("card_replay");
+  });
+
+  it("reserves both tokens in prepare() so send() can transmit even off an empty bucket", async () => {
+    const fetchImpl = vi.fn(async (_u: string, init: any) =>
+      init.headers["PAYMENT-SIGNATURE"]
+        ? new Response(JSON.stringify({ card_opaque_id: "card_x", settlement_tx: "0xtx" }), {
+            status: 200,
+          })
+        : challengeRes(),
+    );
+    // Capacity 2: one token prepare() reserves explicitly for the paid leg, one it spends on
+    // its own probe. The bucket is empty by the time send() runs.
+    const iss = new StraitsXIssuer(cfg, account, new TokenBucket(2, 60_000), fetchImpl as any);
+    const req = { amountCents: 1800, cardholderName: "Happy Agent", idempotencyKey: "p6" };
+    const prepared = await iss.prepare(req);
+    const r = await iss.send(req, prepared); // must not be refused for lack of budget
+    expect(r.opaqueId).toBe("card_x");
+  });
+
+  it("fails prepare() before signing anything when the bucket cannot cover both legs", async () => {
+    const fetchImpl = vi.fn(async () => challengeRes());
+    const iss = new StraitsXIssuer(cfg, account, new TokenBucket(1, 60_000), fetchImpl as any);
+    await expect(
+      iss.prepare({ amountCents: 1800, cardholderName: "Happy Agent", idempotencyKey: "p7" }),
+    ).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    expect(fetchImpl).not.toHaveBeenCalled(); // the probe's own token check failed first
+  });
+
+  it("reports rail status via the onRailStatus callback for OK, RATE_LIMITED, and ERROR", async () => {
+    const statuses: string[] = [];
+    const onRailStatus = (s: "OK" | "RATE_LIMITED" | "ERROR") => statuses.push(s);
+
+    const okIssuer = new StraitsXIssuer(
+      cfg,
+      account,
+      new TokenBucket(10, 60_000),
+      vi.fn(async () => challengeRes()) as any,
+      onRailStatus,
+    );
+    await okIssuer.prepare({
+      amountCents: 1800,
+      cardholderName: "Happy Agent",
+      idempotencyKey: "r1",
+    });
+    expect(statuses).toEqual(["OK"]);
+
+    statuses.length = 0;
+    const rlIssuer = new StraitsXIssuer(
+      cfg,
+      account,
+      new TokenBucket(10, 60_000),
+      vi.fn(async () => new Response("slow down", { status: 429 })) as any,
+      onRailStatus,
+    );
+    await expect(
+      rlIssuer.prepare({ amountCents: 1800, cardholderName: "Happy Agent", idempotencyKey: "r2" }),
+    ).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    expect(statuses).toEqual(["RATE_LIMITED"]);
+
+    statuses.length = 0;
+    const errIssuer = new StraitsXIssuer(
+      cfg,
+      account,
+      new TokenBucket(10, 60_000),
+      vi.fn(async () => {
+        throw new Error("socket hang up");
+      }) as any,
+      onRailStatus,
+    );
+    await expect(
+      errIssuer.prepare({ amountCents: 1800, cardholderName: "Happy Agent", idempotencyKey: "r3" }),
+    ).rejects.toThrow(/socket hang up/);
+    expect(statuses).toEqual(["ERROR"]);
+  });
+
+  it("writes the raw response body to disk before parsing it, and never returns an undefined opaqueId", async () => {
+    sweepCardResponseFiles(); // start from a clean slate for this test's own assertion
+    const fetchImpl = vi.fn(async (_u: string, init: any) =>
+      init.headers["PAYMENT-SIGNATURE"]
+        ? new Response(JSON.stringify({ settlement_tx: "0xtx" }), { status: 200 }) // no card_opaque_id, no id
+        : challengeRes(),
+    );
+    const iss = new StraitsXIssuer(cfg, account, new TokenBucket(10, 60_000), fetchImpl as any);
+    const req = { amountCents: 1800, cardholderName: "Happy Agent", idempotencyKey: "p8" };
+    const prepared = await iss.prepare(req);
+    const r = await iss.send(req, prepared);
+    expect(r.opaqueId).toBe(prepared.nonce); // falls back to the nonce, never undefined
+
+    const created = readdirSync(".").filter((f) => f.startsWith("card-response-"));
+    expect(created).toHaveLength(1);
+    expect(JSON.parse(readFileSync(created[0]!, "utf8"))).toMatchObject({ settlement_tx: "0xtx" });
   });
 });

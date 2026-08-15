@@ -62,7 +62,7 @@ export async function issueCardFor(
     throw new Error(`purchase ${purchaseId} needs human approval before issuance`);
 
   const m = getMandateRow(db);
-  const t = totals(db);
+  const t = totals(db, m?.id ?? null);
   const d = decide(
     {
       amountCents: finalTotalCents,

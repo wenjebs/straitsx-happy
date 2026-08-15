@@ -16,15 +16,17 @@ const cfg = {
 
 const wallet = { view: () => ({ balanceCents: 10000, ageMs: 0 }) } as any;
 let db: Db;
+let mandateId: string;
 
 beforeEach(async () => {
   db = openDb(":memory:");
-  await L.createMandate(db, cfg, {
+  const m = await L.createMandate(db, cfg, {
     perItemCents: 2500,
     dailyCents: 15000,
     merchants: ["shop.example.com"],
     expiresAt: new Date("2026-08-20T00:00:00Z"),
   });
+  mandateId = m.id;
 });
 
 const reserve = () =>
@@ -40,7 +42,7 @@ describe("issueCardFor", () => {
     const deps = { db, cfg, issuer: new MockIssuer(), wallet };
     const r = await issueCardFor(deps, p.id, 1800);
     expect(r.last4).toHaveLength(4);
-    expect(L.totals(db)).toMatchObject({ spentCents: 1800, reservedCents: 0 });
+    expect(L.totals(db, mandateId)).toMatchObject({ spentCents: 1800, reservedCents: 0 });
     // A PENDING row left behind on an issued purchase gets picked up by reconciliation:
     // if the chain reports the nonce unused, it marks the purchase FAILED and releases
     // budget for a card that already exists. The step-4 transaction must have settled it.
@@ -79,7 +81,7 @@ describe("issueCardFor", () => {
     const p = await reserve();
     const deps = { db, cfg, issuer: new MockIssuer(), wallet };
     await issueCardFor(deps, p.id, 1830);
-    expect(L.totals(db)).toMatchObject({ spentCents: 1830 });
+    expect(L.totals(db, mandateId)).toMatchObject({ spentCents: 1830 });
   });
 
   it("refuses to issue for a NEEDS_HUMAN purchase until approved", async () => {

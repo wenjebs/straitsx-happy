@@ -33,6 +33,8 @@ function get(): Ctx {
       cfg,
       wallet.account,
       new TokenBucket(cfg.railBucketCapacity, cfg.railBucketRefillMs),
+      fetch,
+      noteRailStatus,
     );
   }
   wallet.start();
@@ -90,7 +92,7 @@ export async function getMandate() {
   const { db, cfg } = get();
   const m = L.getMandateRow(db);
   if (!m) return null;
-  const t = L.totals(db);
+  const t = L.totals(db, m.id);
   return {
     id: m.id,
     perItemCents: m.per_item_cents,
@@ -178,7 +180,8 @@ export async function getAuditLog(purchaseId: string) {
 export async function getWallet() {
   const { cfg, db, wallet } = get();
   const v = wallet.view();
-  const t = L.totals(db);
+  const m = L.getMandateRow(db);
+  const t = L.totals(db, m?.id ?? null);
   // With no signing key the wallet reports MAX_SAFE_INTEGER so the rules engine never blocks
   // on liquidity. That is not a balance a UI should render — report null instead.
   const mock = cfg.issuer === "mock" || !cfg.spendPrivateKey;

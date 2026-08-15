@@ -12,18 +12,20 @@ const cfg = {
 } as any;
 const chain = { balanceCents: 10000, ageMs: 0 };
 let db: Db;
+let mandateId: string;
 
 const wallet = (used: boolean) =>
   ({ authorizationUsed: async () => used, view: () => chain }) as any;
 
 beforeEach(async () => {
   db = openDb(":memory:");
-  await L.createMandate(db, cfg, {
+  const m = await L.createMandate(db, cfg, {
     perItemCents: 2500,
     dailyCents: 15000,
     merchants: ["shop.example.com"],
     expiresAt: new Date("2026-08-20T00:00:00Z"),
   });
+  mandateId = m.id;
 });
 
 async function pendingPurchase(validBefore: string) {
@@ -61,7 +63,7 @@ describe("resolvePending", () => {
     expect(r.failed).toBe(1);
     const row = db.raw.prepare(`SELECT state FROM purchases WHERE id=?`).get(p.id) as any;
     expect(row.state).toBe("FAILED");
-    expect(L.totals(db)).toMatchObject({ reservedCents: 0, spentCents: 0 });
+    expect(L.totals(db, mandateId)).toMatchObject({ reservedCents: 0, spentCents: 0 });
   });
 
   it("strands a payment whose nonce was consumed on-chain and cannot be recovered", async () => {
@@ -70,7 +72,30 @@ describe("resolvePending", () => {
     expect(r.settled).toBe(1);
     const row = db.raw.prepare(`SELECT state FROM purchases WHERE id=?`).get(p.id) as any;
     expect(row.state).toBe("STRANDED");
-    expect(L.totals(db)).toMatchObject({ spentCents: 1800, strandedCents: 1800 });
+    expect(L.totals(db, mandateId)).toMatchObject({ spentCents: 1800, strandedCents: 1800 });
+  });
+
+  it("leaves the payment PENDING and writes nothing when the replay throws (transient failure)", async () => {
+    const p = await pendingPurchase(new Date(Date.now() - 1000).toISOString());
+    const issuer = {
+      name: "straitsx" as const,
+      prepare: async () => {
+        throw new Error("must not prepare a new nonce");
+      },
+      send: async () => {
+        throw new Error("429 rate limited");
+      },
+      reveal: async () => {
+        throw new Error("not needed");
+      },
+    };
+    const r = await resolvePending({ db, cfg, wallet: wallet(true), issuer });
+    expect(r).toMatchObject({ settled: 0, failed: 0, unresolved: 1 });
+    const row = db.raw.prepare(`SELECT state FROM purchases WHERE id=?`).get(p.id) as any;
+    const pay = db.raw.prepare(`SELECT state FROM payments WHERE purchase_id=?`).get(p.id) as any;
+    expect(row.state).toBe("PAYING");
+    expect(pay.state).toBe("PENDING");
+    expect(L.totals(db, mandateId)).toMatchObject({ reservedCents: 1800, spentCents: 0 });
   });
 
   it("recovers the card by replaying the stored envelope when one is available", async () => {
