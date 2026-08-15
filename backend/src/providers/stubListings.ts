@@ -8,69 +8,58 @@ export type StubListing = {
   url: string;
 };
 
+/** The StraitsX card mints between S$5 and S$30. Outside that, issuance is refused with a 400. */
+export const CARD_MIN_MINOR = 500;
+export const CARD_MAX_MINOR = 3000;
+
 /**
  * Fixed listings, standing in for discovery.
  *
- * What each merchant actually does from an AWS datacentre IP was measured, not guessed — see
- * `docs/agentcore-browser.md`. It is recorded here so nobody reads a purchase.failed from Shopee
- * as a defect in the Closer:
+ * These are real Shopee listings for Suntory Roku gin. Two things about them are measured, not
+ * guessed, and both mean a run against these will fail — visibly and for a stated reason, which is
+ * the point of having them:
  *
- *   Lazada — an intermittent slider captcha. A human clears it in the live view and the run
- *            continues with cookies intact. This is the human-takeover path working, and it is the
- *            reason these listings are worth having.
+ *   1. Shopee blocks us. From an AWS datacentre IP these URLs return Shopee's "Page Unavailable"
+ *      page — served AT the product URL rather than as a redirect, so a URL check alone reports
+ *      success. Only a screenshot or a content check catches it. There is no captcha to solve, so
+ *      the human-takeover path cannot rescue it either. See docs/agentcore-browser.md.
  *
- *   Shopee — a hard bounce to /verify/traffic/error with is_logged_in=false. There is no challenge
- *            to solve, so takeover cannot rescue it and these listings will report
- *            purchase.failed at the first step. The lever for that case is proxyConfiguration on
- *            StartBrowserSession, which is untested.
+ *   2. The price is above the card's ceiling. Roku 700ml sells around S$68-88, and the card cannot
+ *      mint above S$30, so `issueCard` refuses with an HTTP 400 before a browser is ever opened.
  *
- * Every price sits inside the S$5–30 the StraitsX card can mint; outside that range issuance is
- * refused with an HTTP 400 before a browser is ever opened.
+ * `overCardCeiling` marks the second problem explicitly so nobody spends an evening debugging a
+ * purchase that was never going to be authorised.
  */
 export const STUB_LISTINGS: StubListing[] = [
   {
-    title: "Anker 100W USB-C Cable 2m",
-    seller: "Lazada",
-    rating: "4.8",
-    price: "S$18.90",
-    amountMinor: 1890,
-    why: "Matches the specification and clears a captcha a human can solve",
-    url: "https://www.lazada.sg/products/anker-100w-usb-c-cable-i1234567890.html",
-  },
-  {
-    title: "Logitech M240 Wireless Mouse",
-    seller: "Lazada",
-    rating: "4.7",
-    price: "S$24.90",
-    amountMinor: 2490,
-    why: "Well within the card's S$30 ceiling",
-    url: "https://www.lazada.sg/products/logitech-m240-wireless-mouse-i2234567890.html",
-  },
-  {
-    title: "Xiaomi Mi Band Strap",
-    seller: "Lazada",
-    rating: "4.5",
-    price: "S$8.50",
-    amountMinor: 850,
-    why: "Cheap enough to rehearse with, still above the S$5 card floor",
-    url: "https://www.lazada.sg/products/xiaomi-mi-band-strap-i3234567890.html",
-  },
-  {
-    title: "USB-C to USB-C Cable 100W 2m",
+    title: "Suntory Roku Gin 700ml",
     seller: "Shopee",
     rating: "4.9",
-    price: "S$16.90",
-    amountMinor: 1690,
-    why: "Matches the specification — expect a traffic bounce, not a checkout",
-    url: "https://shopee.sg/product/123456789/1234567890",
+    price: "S$78.00",
+    amountMinor: 7800,
+    why: "Japanese craft gin, 700ml as specified",
+    url: "https://shopee.sg/Suntory-Roku-Gin-700ml-i.1452684276.49504598629?extraParams=%7B%22display_model_id%22%3A325426050843%2C%22model_selection_logic%22%3A3%7D",
   },
   {
-    title: "Baseus 65W GaN Charger",
+    title: "Suntory Roku Japanese Gin 700ml",
     seller: "Shopee",
     rating: "4.8",
-    price: "S$28.00",
-    amountMinor: 2800,
-    why: "Near the S$30 ceiling — expect a traffic bounce, not a checkout",
-    url: "https://shopee.sg/product/223456789/2234567890",
+    price: "S$72.00",
+    amountMinor: 7200,
+    why: "Same product, different seller — cheaper",
+    url: "https://shopee.sg/Suntory-Roku-Japanese-Gin-700ml-i.1601446.18343343065?extraParams=%7B%22display_model_id%22%3A231877137377%2C%22model_selection_logic%22%3A2%7D",
+  },
+  {
+    title: "Roku Japanese Gin 700ml",
+    seller: "Shopee",
+    rating: "4.7",
+    price: "S$69.00",
+    amountMinor: 6900,
+    why: "Lowest listed price for the same bottle",
+    url: "https://shopee.sg/Roku-Japanese-Gin-700ml-i.469850887.9277155509?extraParams=%7B%22display_model_id%22%3A93394175812%2C%22model_selection_logic%22%3A3%7D",
   },
 ];
+
+/** Listings the card cannot pay for. Non-empty here is a known limitation, not a bug. */
+export const overCardCeiling = (): StubListing[] =>
+  STUB_LISTINGS.filter((l) => l.amountMinor > CARD_MAX_MINOR);

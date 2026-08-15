@@ -263,6 +263,35 @@ reports the URL you asked for rather than the one you got, which turns a block i
 this probe reported Shopee as reachable twice before the settle wait was added. Every merchant
 verdict in this document waits and re-reads.
 
+### Shopee blocks the automation, not the IP — so nothing we can buy fixes it
+
+Worth stating loudly, because three separate ideas were spent on it before this was measured.
+
+`probe/shopee-prices.ts` loads three Shopee product URLs from a **local Playwright browser on a
+residential Singapore connection** — not AWS. All three bounce to
+`/verify/traffic/error?…&is_logged_in=false`, exactly as they do from AgentCore.
+
+The page titles come back before the bounce, so the product page begins to load and is then
+refused. The same URLs open normally in a hand-driven browser on the same machine and the same
+connection.
+
+**So the judgement is on the automation, not the network.** That rules out, in one measurement:
+
+| Idea | Why it cannot work |
+|---|---|
+| Use AgentCore | Already blocked |
+| Use a local browser instead | Blocked too — same IP as a working manual session |
+| `proxyConfiguration`, or a residential proxy | The IP is not what is being judged |
+| Human takeover in the live view | There is no challenge to clear, only a dead end |
+
+The one lever left is a **logged-in browser profile**: the bounce carries `is_logged_in=false`, and
+`CreateBrowserProfile` + `SaveBrowserSessionProfile` are verified working. A human logs into Shopee
+once through the live view, the profile is saved, and later sessions start authenticated. Untested
+against Shopee, and it is the only remaining idea that is not already disproven.
+
+Otherwise Shopee is out, and a merchant that admits automation — Nylon Coffee reaches a real
+Shopify card form — is the shorter path to a demo that works.
+
 ### Merchants, measured rather than predicted
 
 Five merchants launched simultaneously through `demo/agentcore-server.ts`, plus earlier one-offs.
