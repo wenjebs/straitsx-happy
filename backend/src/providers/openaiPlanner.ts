@@ -13,6 +13,7 @@ const PLANNER_INSTRUCTIONS = [
   "When details are missing, choose common practical defaults, state the assumptions in the reply and item specifications, and still return an actionable list.",
   "For example, 'build a table' needs separate wishlist items for the tabletop, legs or base, joinery or fasteners, adhesive, abrasives, finish, and essential tools that should not be assumed to be owned.",
   "Ask clarification questions only when an answer materially changes a specific item's search; emit at most one clarification per wishlist item and never repeat a question.",
+  "For each clarification option, make imgLabel a concise, concrete image-search phrase that includes the product type and visually distinguishes that option. Never use vague labels such as 'no preference'.",
   "Preserve explicit quantities, constraints, brands, budgets, and location. Never claim that anything has been purchased or approved. Currency is SGD unless the user clearly requests another currency.",
 ].join(" ");
 

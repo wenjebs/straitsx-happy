@@ -35,7 +35,9 @@ export async function resolveWikimediaImage(
     format: "json",
     formatversion: "2",
     generator: "search",
-    gsrsearch: query,
+    // Commons search otherwise ranks PDFs and scanned documents surprisingly highly for verbose
+    // product phrases. Restrict it to displayable bitmap files and remove planner filler words.
+    gsrsearch: `filetype:bitmap ${imageSearchTerms(query)}`,
     gsrnamespace: "6",
     gsrlimit: "4",
     prop: "imageinfo",
@@ -71,6 +73,37 @@ export async function resolveWikimediaImage(
     // Image enrichment is intentionally non-critical to the shopping workflow.
   }
   return null;
+}
+
+function imageSearchTerms(query: string): string {
+  const ignored = new Set([
+    "a",
+    "an",
+    "bag",
+    "choice",
+    "for",
+    "no",
+    "of",
+    "option",
+    "preference",
+    "product",
+    "style",
+    "the",
+    "type",
+    "with",
+  ]);
+  const seen = new Set<string>();
+  const terms = query
+    .replace(/[^\p{L}\p{N}+-]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => {
+      const normalized = word.toLocaleLowerCase();
+      if (!normalized || ignored.has(normalized) || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+  return terms.join(" ") || query.trim();
 }
 
 /** Stable Commons fallbacks for the most common cable clarification. */

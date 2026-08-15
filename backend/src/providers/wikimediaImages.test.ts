@@ -3,8 +3,11 @@ import { resolveWikimediaImage } from "./wikimediaImages.js";
 
 describe("resolveWikimediaImage", () => {
   it("returns the first bitmap thumbnail with a traceable source", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
+    const fetcher: typeof fetch = async (url) => {
+      expect(new URL(String(url)).searchParams.get("gsrsearch")).toBe(
+        "filetype:bitmap warm desk lamp",
+      );
+      return new Response(
         JSON.stringify({
           query: {
             pages: [
@@ -31,6 +34,7 @@ describe("resolveWikimediaImage", () => {
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
+    };
 
     await expect(resolveWikimediaImage("warm desk lamp", fetcher)).resolves.toEqual({
       imageUrl: "https://img.test/cable-640.jpg",

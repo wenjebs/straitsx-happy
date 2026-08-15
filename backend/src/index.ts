@@ -19,6 +19,7 @@ import {
 } from "./providers/card.js";
 import { ChainFundingProvider, DisabledFundingProvider } from "./providers/funding.js";
 import { OpenAIPlannerProvider } from "./providers/openaiPlanner.js";
+import { createOpenAIImageResolver } from "./providers/openaiImages.js";
 import {
   DisabledPurchaseAgentProvider,
   LocalPurchaseAgentProvider,
@@ -129,7 +130,15 @@ const fundingProvider =
         requiredConfirmations: config.DEPOSIT_CONFIRMATIONS,
       })
     : new DisabledFundingProvider();
-const activities = new ActivityService(repository, events, planner, scouts, resolveWikimediaImage);
+const resolveOptionImage = config.OPENAI_API_KEY
+  ? createOpenAIImageResolver({
+      apiKey: config.OPENAI_API_KEY,
+      model: config.OPENAI_MODEL,
+      baseUrl: config.OPENAI_BASE_URL,
+      fallback: resolveWikimediaImage,
+    })
+  : resolveWikimediaImage;
+const activities = new ActivityService(repository, events, planner, scouts, resolveOptionImage);
 const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
 const funding = new WalletFundingService(repository, fundingProvider);
 const walletAuth = new WalletAuthService(config.WALLET_AUTH_SECRET);
