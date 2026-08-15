@@ -137,3 +137,9 @@ export interface MerchantAdapter {
 }
 
 export type BrowserLike = { newPage(): Promise<Page> };
+
+/**
+ * Chooses the browser session for one shop. A Playwright BrowserContext is a BrowserLike, so this
+ * is how a run uses the account the user connected for that shop, and a different one for the next.
+ */
+export type BrowserFor = (merchantHost: string) => BrowserLike | Promise<BrowserLike>;

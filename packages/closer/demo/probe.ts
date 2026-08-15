@@ -9,16 +9,20 @@
  * It NEVER issues a card and never submits a form. It cannot spend money — it does not even load
  * @happy/pay. Use it to sort candidate merchants before any of them touch the money path.
  */
-import { existsSync } from "node:fs";
 import { chromium } from "playwright";
+import { createProfileStore } from "../src/profiles.js";
 
 const url = process.argv[2];
-const dir = process.env.CLOSER_PROFILE_DIR ?? "./closer-profile";
 
 if (!url) {
   console.error("usage: pnpm --filter @happy/closer probe <product-url>");
   process.exit(1);
 }
+
+const store = createProfileStore();
+const host = new URL(url).hostname;
+const connected = store.status(host).connected;
+console.log(`session for ${host}: ${connected ? "connected" : "none — run `login` first"}`);
 
 const CARD = 'input[autocomplete="cc-number"], input[name*="card" i][name*="num" i]';
 const BUY = /buy now|add to cart|checkout|proceed to (pay|checkout)|continue to payment/i;
@@ -30,8 +34,8 @@ const BUY = /buy now|add to cart|checkout|proceed to (pay|checkout)|continue to 
  */
 const NEVER = /place order|pay now|confirm (order|payment)|complete purchase|submit order/i;
 
-const context = existsSync(dir)
-  ? await chromium.launchPersistentContext(dir, { headless: false })
+const context = connected
+  ? await store.contextFor(host)
   : await (await chromium.launch({ headless: false })).newContext();
 
 const page = context.pages()[0] ?? (await context.newPage());

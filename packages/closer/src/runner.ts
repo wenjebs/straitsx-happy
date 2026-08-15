@@ -8,6 +8,7 @@ import {
 } from "./journal.js";
 import { realPay } from "./pay-api.js";
 import type {
+  BrowserFor,
   BrowserLike,
   CheckoutOptions,
   CloserEvent,
@@ -36,7 +37,8 @@ const mandateReason = (e: unknown) =>
   e && typeof e === "object" && "reason" in e ? String((e as { reason: unknown }).reason) : null;
 
 export type CloserDeps = {
-  browser: BrowserLike;
+  /** One session for the whole run, or a function that returns the session for each shop. */
+  browser: BrowserLike | BrowserFor;
   onEvent: (e: CloserEvent) => void;
   pay?: PayApi;
   adapters?: MerchantAdapter[];
@@ -178,7 +180,11 @@ export function createCloser(deps: CloserDeps) {
       return { outcome: skip("NO_ADAPTER", `${sel.itemId} skipped · no adapter for ${url.hostname}`) };
 
     const deadlineAt = now() + preIssueBudgetMs;
-    const page = await deps.browser.newPage();
+    // The session is chosen by the shop's host, so a run can move between shops the user has
+    // connected separately. One BrowserLike for everything still works, and is the default.
+    const session =
+      typeof deps.browser === "function" ? await deps.browser(url.hostname) : deps.browser;
+    const page = await session.newPage();
     try {
       // --- Z1: navigate and read the real total. Everything here is free to fail. -------------
       const ctx = { shipping, log: (t: string) => log(tag, hue, t), deadlineAt };
