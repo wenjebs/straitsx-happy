@@ -113,5 +113,21 @@ export async function browserForEnv(): Promise<BrowserLike> {
   }
   const browser = await chromium.launch();
   const context = await browser.newContext();
-  return { newPage: () => context.newPage() };
+  const like: BrowserLike & { close: () => Promise<void> } = {
+    newPage: () => context.newPage(),
+    close: () => browser.close(),
+  };
+  return like;
+}
+
+/**
+ * Ends the browser session, whatever kind it is.
+ *
+ * `BrowserLike` is only `{ newPage }` because that is all the runner needs, but both concrete
+ * implementations carry a `close`. Skipping this leaves an AgentCore session billing for its full
+ * half-hour TTL — three failed runs left three sessions running before it was caught.
+ */
+export async function releaseBrowser(browser: BrowserLike): Promise<void> {
+  const closable = browser as BrowserLike & { close?: () => Promise<void> };
+  if (typeof closable.close === "function") await closable.close();
 }

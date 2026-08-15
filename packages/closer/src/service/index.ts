@@ -2,10 +2,11 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Page } from "playwright";
 import { typeCardInto } from "./fill.js";
+import { attachFrames } from "./frames.js";
 import { createJobStore } from "./jobs.js";
 import { createLiveView } from "./liveview.js";
 import { runPurchase } from "./run.js";
-import { browserForEnv, createPurchaseServer } from "./server.js";
+import { browserForEnv, createPurchaseServer, releaseBrowser } from "./server.js";
 import type { PurchaseJobInput } from "./verify.js";
 
 export async function startPurchaseService(port?: number): Promise<Server> {
@@ -26,8 +27,10 @@ export async function startPurchaseService(port?: number): Promise<Server> {
           jobs,
           view,
           browserFor: browserForEnv,
+          releaseBrowser,
           liveUrlFor: (attemptId) =>
             `${publicBaseUrl(server, listenPort)}/v1/live/${encodeURIComponent(attemptId)}`,
+          attachFrames: (page, attemptId) => attachFrames(page, attemptId, view),
           toPaymentPage,
           fillCard: typeCardInto,
           readTotalMinor,

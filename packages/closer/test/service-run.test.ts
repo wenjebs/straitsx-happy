@@ -72,6 +72,7 @@ function harness(
     fillCard: async () => {},
     readTotalMinor: async () => totalMinor,
     submit: async () => orderRef,
+    log: () => {},
     ...over,
   };
   return { deps, posted };
@@ -172,6 +173,34 @@ describe("purchase run", () => {
 
     expect(posted.slice(after).at(-1)?.type).toBe("purchase.failed");
     expect(String(posted.slice(after).at(-1)?.message)).toMatch(/already claimed/i);
+  });
+
+  /*
+   * An AgentCore session bills until it is stopped and its TTL is half an hour, so a run that
+   * forgets to release its browser leaks money on every attempt — including every fast failure.
+   * Three dead runs left three sessions billing before this was noticed in the AWS console, which
+   * is not a safety net.
+   */
+  it("releases the browser on success", async () => {
+    const released: unknown[] = [];
+    const { deps } = harness();
+    deps.releaseBrowser = async (b) => {
+      released.push(b);
+    };
+    deps.jobs.accept(jobInput());
+    await runPurchase(deps, jobInput());
+    expect(released).toHaveLength(1);
+  });
+
+  it("releases the browser even when the run fails", async () => {
+    const released: unknown[] = [];
+    const { deps } = harness({}, 9999); // merchant total over the approved amount
+    deps.releaseBrowser = async (b) => {
+      released.push(b);
+    };
+    deps.jobs.accept(jobInput());
+    await runPurchase(deps, jobInput());
+    expect(released).toHaveLength(1);
   });
 
   it("calls toPaymentPage before reading the total", async () => {

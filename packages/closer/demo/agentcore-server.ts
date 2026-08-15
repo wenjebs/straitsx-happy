@@ -38,15 +38,19 @@ const MAX_SLOTS = Number(process.env.AGENTCORE_MAX_SLOTS ?? 6);
 const consoleUrl = `https://${REGION}.console.aws.amazon.com/bedrock-agentcore/home?region=${REGION}`;
 
 /**
- * The merchants worth asking about, from docs/merchant-shortlist.md. The marketplaces are the
- * interesting ones — they are where a datacentre IP is most likely to be judged — and Nylon is
- * the control, already proven to admit us all the way to a Shopify card form.
+ * Singapore retailers running their own storefronts.
+ *
+ * The marketplaces are deliberately gone. Shopee and Amazon SG refuse automated browsers outright,
+ * and Shopee does so from a residential IP as well as from AWS — it is judging the automation, not
+ * the network, so no proxy, login or datacentre change reaches them. A shop that simply wants to
+ * sell you something is the shorter path, and Nylon Coffee already proved the category works all
+ * the way to a Shopify card form.
  */
 const PRESETS = [
-  { label: "Shopee", url: "https://shopee.sg/" },
-  { label: "Lazada", url: "https://www.lazada.sg/" },
-  { label: "Amazon SG", url: "https://www.amazon.sg/" },
-  { label: "FairPrice", url: "https://www.fairprice.com.sg/" },
+  { label: "Polypet", url: "https://polypet.com.sg/" },
+  { label: "Cocomo", url: "https://cocomo.sg/" },
+  { label: "Prism+", url: "https://prismplus.sg/" },
+  { label: "Sweelee", url: "https://sweelee.com.sg/" },
   { label: "Nylon (control)", url: "https://nylon.coffee/collections/all" },
 ];
 
