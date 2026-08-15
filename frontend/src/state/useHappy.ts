@@ -1,382 +1,368 @@
-import { useEffect, useMemo, useReducer } from "react";
-import { ACTIVITY_TITLE, type ArchiveId, ITEMS, type ItemId } from "../data/catalog";
-import { activeItems, listingFor, logStamp, searchComplete } from "./derive";
-import type { HappyState, Message, RuleState, Screen, Stage } from "./types";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import type { Activity, ActivityEvent, ActivityStage, ConnectionState } from "../lib/Api";
+import * as Api from "../lib/Api";
+import type { Focused, HappyState, Screen } from "./types";
 
-/** Demo knobs. In production the tick is a server-pushed agent event. */
-export interface HappyOptions {
-  autoPlay?: boolean;
-  /** 700–3500ms. */
-  tickMs?: number;
-}
-
-const WISHLIST_REPLY =
-  "Six parts get you a solid 1080p build. Prices are current Singapore street prices, " +
-  "total lands near S$1,285 — inside your budget with room for a cooler if you want one.";
-
-const DISPATCH_REPLY =
-  "That is everything ambiguous resolved. The other four are spec-bound, so agents can " +
-  "search them directly. Twelve agents, two per item, each working its own candidate listings.";
-
-const RULE_CYCLE: readonly RuleState[] = ["allowed", "ask first", "blocked"];
-
-export const initialState: HappyState = {
+const initialState: HappyState = {
   screen: "purchase",
-  stage: "idle",
   sidebarOpen: true,
-  draft: "",
-  msgs: [],
-  editing: false,
-  newItem: "",
-  removed: {},
-  chosen: {},
-  rejected: {},
-  tick: 0,
-  playing: true,
-  execStep: 0,
-  log: [],
-  balance: 4820.5,
-  toast: "",
-  autoApprove: true,
-  itemCap: 600,
-  actCap: 2500,
-  ruleState: {
-    Electronics: "allowed",
-    Groceries: "allowed",
-    Apparel: "ask first",
-    Travel: "ask first",
-    Collectibles: "blocked",
-  },
-  settingsState: { notify: true, sandbox: false },
-  activityLive: false,
-  activityDone: false,
   focused: null,
-  actStage: "wishlist",
-  actMsgs: [],
+  draft: "",
+  newItem: "",
+  editing: false,
+  detached: true,
+  confirmingPurchase: false,
+  purchaseSubmitting: false,
+  elapsed: 0,
+  running: null,
+  archived: [],
+  viewingArchive: null,
+  wallet: null,
+  mandate: null,
+  settings: null,
+  profile: null,
+  connection: Api.isLive() ? "connecting" : "mock",
+  error: null,
+  loading: true,
 };
 
-export type Action =
-  | { type: "setDraft"; value: string }
-  | { type: "setNewItem"; value: string }
-  | { type: "send" }
-  | { type: "wishlistReady" }
-  | { type: "toggleEditing" }
-  | { type: "addItem" }
-  | { type: "removeItem"; id: ItemId }
-  | { type: "approveWishlist" }
-  | { type: "pick"; itemId: ItemId; option: string }
-  | { type: "startSearch" }
-  | { type: "tick" }
-  | { type: "togglePlay" }
-  | { type: "goStage"; stage: Stage }
-  | { type: "goShortlist" }
-  | { type: "reject"; id: ItemId }
-  | { type: "confirmPurchase" }
-  | { type: "execAdvance" }
-  | { type: "topUp" }
-  | { type: "toggleSidebar" }
-  | { type: "goScreen"; screen: Screen }
-  | { type: "back" }
-  | { type: "openCurrent" }
-  | { type: "openArchive"; id: ArchiveId }
-  | { type: "newActivity" }
-  | { type: "toggleAuto" }
-  | { type: "setItemCap"; value: number }
-  | { type: "setActCap"; value: number }
-  | { type: "cycleRule"; name: string }
-  | { type: "toggleSetting"; key: "notify" | "sandbox" };
-
-function curatorMessage(itemId: ItemId, text: string): Message {
-  return { kind: "curator", text, itemId };
-}
-
-function firstCuratorMessage(): Message {
-  const gpu = ITEMS.find((i) => i.id === "gpu");
-  return curatorMessage(
-    "gpu",
-    `Two calls need you before agents go out. First, ${(gpu?.name ?? "item").toLowerCase()} — ` +
-      "three shapes this could take:",
-  );
-}
+type Action = { type: "set"; patch: Partial<HappyState> } | { type: "event"; event: ActivityEvent };
 
 /**
- * Leaving a focused activity stashes its conversation so the in-flight run is
- * restored intact when its feed card is clicked again.
+ * Applies one server event. Each case touches only what moved, so a stage
+ * change does not re-create the arrays the search screen is animating.
  */
-function stash(s: HappyState): Pick<HappyState, "actStage" | "actMsgs" | "stage" | "msgs"> {
-  return {
-    actStage: s.stage !== "idle" ? s.stage : s.actStage,
-    actMsgs: s.msgs.length ? s.msgs : s.actMsgs,
-    stage: "idle",
-    msgs: [],
-  };
-}
+function applyEvent(activity: Activity | null, event: ActivityEvent): Activity | null {
+  if (event.type === "activity.snapshot") return event.activity;
+  if (!activity) return activity;
 
-/** Seeded conversation for the stage bar's demo jumps. */
-function seedMessages(stage: Stage): Message[] {
-  const msgs: Message[] = [
-    { kind: "user", text: "build me a budget gaming PC under S$1,600" },
-    { kind: "wishlist", text: WISHLIST_REPLY },
-  ];
-  if (stage === "curate") {
-    msgs.push({ kind: "user", text: "Looks right — go ahead." }, firstCuratorMessage());
-  }
-  return msgs;
-}
+  switch (event.type) {
+    case "activity.stage":
+      return { ...activity, stage: event.stage };
 
-export function reducer(s: HappyState, a: Action): HappyState {
-  switch (a.type) {
-    case "setDraft":
-      return { ...s, draft: a.value };
-
-    case "setNewItem":
-      return { ...s, newItem: a.value };
-
-    case "send": {
-      const text = s.draft.trim() || "build me a budget gaming PC under S$1,600";
-      return {
-        ...s,
-        draft: "",
-        stage: "wishlist",
-        activityLive: true,
-        msgs: [
-          { kind: "user", text },
-          { kind: "thinking", text: "", label: "decomposing goal into a wishlist" },
-        ],
-      };
+    case "item.progress": {
+      const itemProgress = activity.itemProgress.some((p) => p.itemId === event.progress.itemId)
+        ? activity.itemProgress.map((p) =>
+            p.itemId === event.progress.itemId ? event.progress : p,
+          )
+        : [...activity.itemProgress, event.progress];
+      return { ...activity, itemProgress };
     }
 
-    case "wishlistReady": {
-      const first = s.msgs[0];
-      if (!first) return s;
-      return { ...s, msgs: [first, { kind: "wishlist", text: WISHLIST_REPLY }] };
+    case "agent.update": {
+      const agents = activity.agents.some((a) => a.agentId === event.agent.agentId)
+        ? activity.agents.map((a) => (a.agentId === event.agent.agentId ? event.agent : a))
+        : [...activity.agents, event.agent];
+      return { ...activity, agents };
     }
 
-    case "toggleEditing":
-      return { ...s, editing: !s.editing };
-
-    case "addItem":
-      return { ...s, newItem: "" };
-
-    case "removeItem":
-      return { ...s, removed: { ...s.removed, [a.id]: true } };
-
-    case "approveWishlist":
-      return {
-        ...s,
-        stage: "curate",
-        editing: false,
-        msgs: [...s.msgs, { kind: "user", text: "Looks right — go ahead." }, firstCuratorMessage()],
-      };
-
-    case "pick": {
-      const chosen = { ...s.chosen, [a.itemId]: a.option };
-      const msgs: Message[] = [...s.msgs, { kind: "user", text: a.option }];
-      if (a.itemId === "gpu") {
-        msgs.push(
-          curatorMessage(
-            "case",
-            "Locked. Next, the case — this one changes thermals more than it looks:",
-          ),
-        );
-      } else {
-        msgs.push({ kind: "locked", text: DISPATCH_REPLY });
-      }
-      return { ...s, chosen, msgs };
+    case "exec.step": {
+      const execution = activity.execution.some((r) => r.itemId === event.row.itemId)
+        ? activity.execution.map((r) => (r.itemId === event.row.itemId ? event.row : r))
+        : [...activity.execution, event.row];
+      return { ...activity, execution };
     }
 
-    case "startSearch":
-      return { ...s, stage: "search", tick: 0, playing: true };
+    case "log.line":
+      return activity.log.some((l) => l.id === event.line.id)
+        ? activity
+        : { ...activity, log: [...activity.log, event.line] };
 
-    case "tick":
-      return { ...s, tick: s.tick + 1 };
+    case "message.appended":
+      return activity.messages.some((m) => m.id === event.message.id)
+        ? activity
+        : { ...activity, messages: [...activity.messages, event.message] };
 
-    case "togglePlay":
-      return { ...s, playing: !s.playing };
+    case "shortlist.ready":
+      return { ...activity, shortlist: event.shortlist, stage: "shortlist" };
 
-    case "goShortlist":
-      return { ...s, stage: "shortlist" };
-
-    case "goStage": {
-      const base: HappyState = {
-        ...s,
-        screen: "purchase",
-        stage: a.stage,
-        activityLive: a.stage !== "idle",
-      };
-      if (a.stage === "search") return { ...base, tick: 0, playing: true };
-      if (a.stage === "exec") {
-        return { ...base, execStep: 0, log: [], activityDone: false, activityLive: true };
-      }
-      if (a.stage === "wishlist" || a.stage === "curate") {
-        return { ...base, msgs: seedMessages(a.stage) };
-      }
-      return base;
-    }
-
-    case "reject":
-      return { ...s, rejected: { ...s.rejected, [a.id]: true } };
-
-    case "confirmPurchase":
+    case "activity.completed":
       return {
-        ...s,
-        stage: "exec",
-        execStep: 0,
-        log: [],
-        activityDone: false,
-        activityLive: true,
-      };
-
-    case "execAdvance": {
-      const items = activeItems(s);
-      const n = s.execStep;
-      const total = items.length * 4;
-      if (n >= total) {
-        const spent = items.reduce((sum, i) => sum + listingFor(s, i.id).amount, 0);
-        return {
-          ...s,
-          activityDone: true,
-          activityLive: false,
-          balance: Math.round((s.balance - spent) * 100) / 100,
-        };
-      }
-      const item = items[Math.floor(n / 4)];
-      if (!item) return s;
-      const listing = listingFor(s, item.id);
-      const step = n % 4;
-      const text =
-        step === 0
-          ? `card 4319 ${4400 + n} issued · limit ${listing.price}`
-          : step === 1
-            ? `${listing.seller.toLowerCase().replace(/ /g, "-")}/checkout · autofill ok`
-            : step === 2
-              ? `placing order ${listing.price}`
-              : `order #SG${830142 + n * 7} confirmed · card expired`;
-      return {
-        ...s,
-        execStep: n + 1,
-        log: [...s.log, { ts: logStamp(n), short: item.short, hue: item.hue, text }],
-      };
-    }
-
-    case "topUp":
-      return {
-        ...s,
-        balance: Math.round((s.balance + 500) * 100) / 100,
-        toast: "+500.00 XSGD received · tx 0x4c…9ae1 · 3 confirmations",
-      };
-
-    case "toggleSidebar":
-      return { ...s, sidebarOpen: !s.sidebarOpen };
-
-    case "goScreen":
-      return { ...s, screen: a.screen, toast: "" };
-
-    case "back":
-      return { ...s, screen: "purchase", focused: null, toast: "", ...stash(s) };
-
-    case "openCurrent":
-      return {
-        ...s,
-        screen: "purchase",
-        focused: "current",
-        stage: s.stage !== "idle" ? s.stage : s.actStage,
-        msgs: s.msgs.length ? s.msgs : s.actMsgs,
-      };
-
-    case "openArchive":
-      return { ...s, screen: "purchase", focused: a.id, ...stash(s) };
-
-    case "newActivity":
-      return {
-        ...s,
-        screen: "purchase",
-        stage: "idle",
-        msgs: [],
-        tick: 0,
-        log: [],
-        execStep: 0,
-        rejected: {},
-        chosen: {},
-        removed: {},
-        activityLive: false,
-        activityDone: false,
-        focused: null,
-        actMsgs: [],
-        actStage: "wishlist",
-      };
-
-    case "toggleAuto":
-      return { ...s, autoApprove: !s.autoApprove };
-
-    case "setItemCap":
-      return { ...s, itemCap: a.value };
-
-    case "setActCap":
-      return { ...s, actCap: a.value };
-
-    case "cycleRule": {
-      const current = s.ruleState[a.name] ?? "allowed";
-      const next = RULE_CYCLE[(RULE_CYCLE.indexOf(current) + 1) % RULE_CYCLE.length] ?? "allowed";
-      return { ...s, ruleState: { ...s.ruleState, [a.name]: next } };
-    }
-
-    case "toggleSetting":
-      return {
-        ...s,
-        settingsState: { ...s.settingsState, [a.key]: !s.settingsState[a.key] },
+        ...activity,
+        status: "completed",
+        completedAt: event.completedAt,
+        displayTs: event.completedAt,
+        totalMinor: event.totalMinor,
       };
 
     default:
-      return s;
+      return activity;
   }
+}
+
+function reducer(state: HappyState, action: Action): HappyState {
+  if (action.type === "set") return { ...state, ...action.patch };
+
+  if (action.event.type === "wallet.updated") {
+    return { ...state, wallet: action.event.wallet };
+  }
+  return { ...state, running: applyEvent(state.running, action.event) };
+}
+
+export interface HappyActions {
+  send: () => Promise<void>;
+  setDraft: (value: string) => void;
+  setNewItem: (value: string) => void;
+  toggleEditing: () => void;
+  addItem: () => Promise<void>;
+  removeItem: (itemId: string) => Promise<void>;
+  approveWishlist: () => Promise<void>;
+  choose: (itemId: string, option: string) => Promise<void>;
+  dispatchAgents: () => Promise<void>;
+  togglePlay: () => Promise<void>;
+  reject: (itemId: string) => Promise<void>;
+  /** Opens the confirmation. Does not spend. */
+  requestPurchase: () => void;
+  cancelPurchase: () => void;
+  /** The only call that spends. Never retried. */
+  confirmPurchase: () => Promise<void>;
+  topUp: () => Promise<void>;
+  setMandate: (changes: Partial<Api.Mandate>) => Promise<void>;
+  setSetting: (key: "notify" | "sandbox") => Promise<void>;
+  goScreen: (screen: Screen) => void;
+  back: () => void;
+  openCurrent: () => void;
+  openArchive: (id: string) => Promise<void>;
+  newActivity: () => void;
+  jumpToStage: (stage: ActivityStage) => Promise<void>;
+  toggleSidebar: () => void;
+  dismissError: () => void;
 }
 
 export interface Happy {
   state: HappyState;
-  dispatch: React.Dispatch<Action>;
-  tickMs: number;
-  title: string;
+  actions: HappyActions;
+  /** The activity the main column should render, if any. */
+  displayed: Activity | null;
 }
 
-export function useHappy(options: HappyOptions = {}): Happy {
-  const tickMs = options.tickMs ?? 1500;
-  const autoPlay = options.autoPlay !== false;
-  const [state, dispatch] = useReducer(reducer, initialState, (s) => ({
-    ...s,
-    playing: autoPlay,
-  }));
+export function useHappy(): Happy {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const set = useCallback((patch: Partial<HappyState>) => dispatch({ type: "set", patch }), []);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
-  const thinking = state.msgs.some((m) => m.kind === "thinking");
-  const complete = state.stage === "search" && searchComplete(state);
+  const fail = useCallback(
+    (e: unknown) => set({ error: e instanceof Error ? e.message : String(e) }),
+    [set],
+  );
 
-  /* The assistant's reply lands ~1100ms after the goal is sent. */
+  /* Initial load. Every screen reads from the API in live mode. */
   useEffect(() => {
-    if (!thinking) return;
-    const id = setTimeout(() => dispatch({ type: "wishlistReady" }), 1100);
-    return () => clearTimeout(id);
-  }, [thinking]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [activities, wallet, mandate, settings, profile] = await Promise.all([
+          Api.listActivities(),
+          Api.getWallet(),
+          Api.getMandate(),
+          Api.getSettings(),
+          Api.getProfile(),
+        ]);
+        if (cancelled) return;
+        const running = activities.find((a) => a.status === "live") ?? null;
+        set({
+          archived: activities.filter((a) => a.status !== "live"),
+          running,
+          detached: !running,
+          wallet,
+          mandate,
+          settings,
+          profile,
+          loading: false,
+          connection: Api.isLive() ? "open" : "mock",
+        });
+      } catch (e) {
+        if (!cancelled) {
+          set({ loading: false, connection: "error" });
+          fail(e);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [set, fail]);
 
-  /* Agents advance one stage per tick. Pause stops it without losing position. */
+  /*
+   * One subscription for the running activity. The stream is the source of
+   * truth for anything that moves, so this stays open while the activity lives
+   * — including while the user is on another screen, which is what lets the
+   * feed card keep advancing.
+   */
+  const runningId = state.running?.id ?? null;
   useEffect(() => {
-    if (state.stage !== "search" || !state.playing || complete) return;
-    const id = setInterval(() => dispatch({ type: "tick" }), tickMs);
+    if (!runningId) return;
+    const sub = Api.subscribeToActivity(
+      runningId,
+      (event) => dispatch({ type: "event", event }),
+      (connection: ConnectionState) => set({ connection }),
+    );
+    return () => sub.close();
+  }, [runningId, set]);
+
+  /* Elapsed counter for "t+42s". Ticks off the clock, not off agent events. */
+  const startedAt = state.running?.searchStartedAt;
+  const searching = state.running?.stage === "search" && state.running.searchPlaying;
+  useEffect(() => {
+    if (!startedAt || !searching) return;
+    const base = new Date(startedAt).getTime();
+    const update = () => set({ elapsed: Math.max(0, Math.round((Date.now() - base) / 1000)) });
+    update();
+    const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [state.stage, state.playing, complete, tickMs]);
+  }, [startedAt, searching, set]);
 
-  /* Once every item is Selected the screen hands over to the shortlist. */
-  useEffect(() => {
-    if (!complete) return;
-    const id = setTimeout(() => dispatch({ type: "goShortlist" }), 1400);
-    return () => clearTimeout(id);
-  }, [complete]);
+  const actions = useMemo<HappyActions>(() => {
+    /** Replaces the running activity with whatever a mutation returned. */
+    const applied = (activity: Activity) => set({ running: activity, error: null });
 
-  /* Purchases run strictly sequentially, four steps per item. */
-  useEffect(() => {
-    if (state.stage !== "exec" || state.activityDone) return;
-    const id = setInterval(() => dispatch({ type: "execAdvance" }), 620);
-    return () => clearInterval(id);
-  }, [state.stage, state.activityDone]);
+    const guard = async (fn: () => Promise<void>) => {
+      try {
+        await fn();
+      } catch (e) {
+        fail(e);
+      }
+    };
 
-  return useMemo(() => ({ state, dispatch, tickMs, title: ACTIVITY_TITLE }), [state, tickMs]);
+    return {
+      setDraft: (value) => set({ draft: value }),
+      setNewItem: (value) => set({ newItem: value }),
+      toggleEditing: () => set({ editing: !stateRef.current.editing }),
+      toggleSidebar: () => set({ sidebarOpen: !stateRef.current.sidebarOpen }),
+      dismissError: () => set({ error: null }),
+
+      send: () =>
+        guard(async () => {
+          const goal = stateRef.current.draft.trim() || "build me a budget gaming PC under S$1,600";
+          set({ draft: "", detached: false });
+          applied(await Api.createActivity(goal));
+        }),
+
+      addItem: () =>
+        guard(async () => {
+          const { running, newItem } = stateRef.current;
+          if (!running || !newItem.trim()) return set({ newItem: "" });
+          const next = await Api.addWishlistItem(running.id, newItem.trim());
+          set({ newItem: "" });
+          applied(next);
+        }),
+
+      removeItem: (itemId) =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          if (running) applied(await Api.removeWishlistItem(running.id, itemId));
+        }),
+
+      approveWishlist: () =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          if (running) applied(await Api.approveWishlist(running.id));
+        }),
+
+      choose: (itemId, option) =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          if (running) applied(await Api.chooseOption(running.id, itemId, option));
+        }),
+
+      dispatchAgents: () =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          if (running) applied(await Api.dispatchAgents(running.id));
+        }),
+
+      togglePlay: () =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          if (running) applied(await Api.setSearchPlaying(running.id, !running.searchPlaying));
+        }),
+
+      reject: (itemId) =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          if (running) applied(await Api.rejectPick(running.id, itemId));
+        }),
+
+      requestPurchase: () => set({ confirmingPurchase: true }),
+      cancelPurchase: () => set({ confirmingPurchase: false }),
+
+      /*
+       * The one irreversible call. On the live rail this issues real single-use
+       * cards, so it is guarded by an explicit confirmation, submitted once, and
+       * never retried automatically — a retry here would double-spend.
+       */
+      confirmPurchase: async () => {
+        const { running, purchaseSubmitting } = stateRef.current;
+        if (!running || purchaseSubmitting) return;
+        set({ purchaseSubmitting: true, confirmingPurchase: false });
+        try {
+          const key = `${running.id}:${running.totalMinor}:${Date.now()}`;
+          applied(await Api.confirmPurchase(running.id, key));
+        } catch (e) {
+          fail(e);
+        } finally {
+          set({ purchaseSubmitting: false });
+        }
+      },
+
+      topUp: () => guard(async () => set({ wallet: await Api.topUpWallet(50000), error: null })),
+
+      setMandate: (changes) =>
+        guard(async () => set({ mandate: await Api.updateMandate(changes), error: null })),
+
+      setSetting: (key) =>
+        guard(async () => {
+          const current = stateRef.current.settings;
+          if (!current) return;
+          set({ settings: await Api.updateSettings({ [key]: !current[key] }), error: null });
+        }),
+
+      goScreen: (screen) => set({ screen }),
+
+      back: () => set({ screen: "purchase", focused: null, detached: true, viewingArchive: null }),
+
+      openCurrent: () =>
+        set({ screen: "purchase", focused: "current", detached: false, viewingArchive: null }),
+
+      openArchive: (id) =>
+        guard(async () => {
+          const activity = await Api.getActivity(id);
+          set({ screen: "purchase", focused: id, viewingArchive: activity, detached: true });
+        }),
+
+      newActivity: () =>
+        set({
+          screen: "purchase",
+          focused: null,
+          detached: true,
+          viewingArchive: null,
+          running: null,
+          draft: "",
+          editing: false,
+        }),
+
+      /*
+       * Demo affordance from the stage bar. In live mode this asks the backend
+       * to move the activity, so it stays honest rather than faking client state.
+       */
+      jumpToStage: (stage) =>
+        guard(async () => {
+          const { running } = stateRef.current;
+          set({ focused: "current", detached: false });
+          if (!running) return;
+          if (stage === "search") applied(await Api.dispatchAgents(running.id));
+          else if (stage === "shortlist" || stage === "exec") {
+            /* Never auto-start a spend from a nav control. */
+            set({ error: null });
+          }
+        }),
+    };
+  }, [set, fail]);
+
+  const displayed = state.viewingArchive ?? (state.detached ? null : state.running);
+
+  return { state, actions, displayed };
 }
+
+export type { Focused };

@@ -1,61 +1,40 @@
-import {
-  ALTERNATES,
-  ITEMS,
-  type Item,
-  type ItemId,
-  LISTINGS,
-  type Listing,
-  type StageIndex,
-} from "../data/catalog";
-import type { HappyState, Stage } from "./types";
+import type { Activity, ActivityStage, ItemProgress, StageIndex } from "../lib/Api";
 
-/** Where an item sits on the track, and whether it just moved backward. */
-export interface ItemPosition {
-  stage: StageIndex;
-  /** True when this tick moved the item to an earlier stage — drives the glow. */
-  back: boolean;
-  /** True before this item's agents are dispatched. */
-  waiting: boolean;
+/** Identity hue for an item, by palette index. Six before recycling. */
+export function hue(index: number): string {
+  return `var(--hue-${((index % 6) + 6) % 6})`;
 }
 
-export function itemPosition(item: Item, tick: number): ItemPosition {
-  const last = item.path.length - 1;
-  const c = Math.max(0, Math.min(last, tick - item.start));
-  const cur = (item.path[c] ?? 0) as StageIndex;
-  const prev = c > 0 ? (item.path[c - 1] ?? cur) : cur;
-  return { stage: cur, back: cur < prev, waiting: tick < item.start };
+/** Minor units (SGD cents) to a display string. */
+export function formatMinor(minor: number): string {
+  return `S$${(minor / 100).toLocaleString("en-SG", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
-export function activeItems(state: HappyState): Item[] {
-  return ITEMS.filter((i) => !state.removed[i.id]);
-}
-
-/** A rejected pick swaps in its alternate, if one exists. */
-export function listingFor(state: HappyState, id: ItemId): Listing {
-  const alt = ALTERNATES[id];
-  return state.rejected[id] && alt ? alt : LISTINGS[id];
-}
-
-export function shortlistTotal(state: HappyState): number {
-  return activeItems(state).reduce((sum, i) => sum + listingFor(state, i.id).amount, 0);
-}
-
-/** Every item has reached the end of its authored path. */
-export function searchComplete(state: HappyState): boolean {
-  return activeItems(state).every((i) => state.tick - i.start >= i.path.length - 1);
+export function progressFor(activity: Activity | null, itemId: string): ItemProgress | undefined {
+  return activity?.itemProgress.find((p) => p.itemId === itemId);
 }
 
 /**
- * The stage the running activity is actually at, which survives leaving the
- * screen. The feed chip and its chevron fraction must both come from this —
- * never from the displayed view, or a card can read "drafting" while its bar
- * shows search progress.
+ * True when this item's last move was to an earlier stage. Drives the slower
+ * overshoot curve and the glow ring — the one thing on the search screen that
+ * must never be inferred from a clock, only from what the agent actually did.
  */
-export function effectiveStage(state: HappyState): Stage {
-  return state.stage !== "idle" ? state.stage : state.actStage;
+export function movedBackward(progress: ItemProgress | undefined): boolean {
+  return !!progress && !progress.queued && progress.stage < progress.previousStage;
 }
 
-const FLOW_INDEX: Record<Stage, number> = {
+export function executionFor(activity: Activity | null, itemId: string) {
+  return activity?.execution.find((r) => r.itemId === itemId);
+}
+
+export function agentsFor(activity: Activity | null, itemId: string) {
+  return (activity?.agents ?? []).filter((a) => a.itemId === itemId);
+}
+
+const FLOW_INDEX: Record<ActivityStage, number> = {
   idle: 0,
   wishlist: 0,
   curate: 1,
@@ -64,30 +43,29 @@ const FLOW_INDEX: Record<Stage, number> = {
   exec: 4,
 };
 
-/** How far through the current stage we are, 0–1. */
-function intraStage(state: HappyState, stage: Stage): number {
-  if (stage === "search") {
-    return Math.max(
-      ...activeItems(state).map((i) => {
-        const last = i.path.length - 1;
-        return last > 0 ? Math.max(0, Math.min(last, state.tick - i.start)) / last : 1;
-      }),
-    );
+/** How far through the current stage the activity is, 0-1. */
+function intraStage(activity: Activity): number {
+  if (activity.stage === "search") {
+    const stages = activity.itemProgress.map((p) => p.stage / 4);
+    return stages.length ? Math.max(...stages) : 0;
   }
-  if (stage === "exec") {
-    if (state.activityDone) return 1;
-    const total = activeItems(state).length * 4;
-    return total > 0 ? Math.min(1, state.execStep / total) : 0;
+  if (activity.stage === "exec") {
+    if (activity.status === "completed") return 1;
+    const total = activity.execution.length * 4;
+    if (total === 0) return 0;
+    const done = activity.execution.reduce((sum, r) => sum + r.step, 0);
+    return Math.min(1, done / total);
   }
   return 0.5;
 }
 
-/** Fraction feeding the activity feed card's 26-chevron bar. */
-export function flowFraction(state: HappyState): number {
-  if (state.activityDone) return 1;
-  if (!state.activityLive) return 0;
-  const stage = effectiveStage(state);
-  return (FLOW_INDEX[stage] + intraStage(state, stage)) / 5;
+/** Fraction feeding an activity feed card's 26-chevron bar. */
+export function flowFraction(activity: Activity | null): number {
+  if (!activity) return 0;
+  if (activity.status === "completed") return 1;
+  if (activity.status === "cancelled") return 0.45;
+  if (activity.stage === "idle") return 0;
+  return (FLOW_INDEX[activity.stage] + intraStage(activity)) / 5;
 }
 
 /**
@@ -101,21 +79,26 @@ export const STAGE_GROUPS = [
   { name: "search", target: "search", matches: ["search"] },
   { name: "pick", target: "shortlist", matches: ["shortlist"] },
   { name: "buy", target: "exec", matches: ["exec"] },
-] as const satisfies readonly { name: string; target: Stage; matches: readonly Stage[] }[];
+] as const satisfies readonly {
+  name: string;
+  target: ActivityStage;
+  matches: readonly ActivityStage[];
+}[];
 
-/** Fraction feeding the stage bar's 5 groups of 8 chevrons. */
-export function stageBarFraction(state: HappyState): number {
-  if (state.stage === "idle") return 0;
-  const gi = STAGE_GROUPS.findIndex((g) => (g.matches as readonly Stage[]).includes(state.stage));
+export function stageBarFraction(activity: Activity | null): number {
+  if (!activity || activity.stage === "idle") return 0;
+  const gi = STAGE_GROUPS.findIndex((g) =>
+    (g.matches as readonly ActivityStage[]).includes(activity.stage),
+  );
   if (gi < 0) return 0;
   const partial =
-    state.stage === "search" || state.stage === "exec" ? intraStage(state, state.stage) : 1;
+    activity.stage === "search" || activity.stage === "exec" ? intraStage(activity) : 1;
   return (gi + partial) / 5;
 }
 
 /**
- * Chevron fill colours for a bar. Warm ramp — amber at the left through orange
- * to red at the right — with unfilled chevrons gray.
+ * Chevron fill colours. Warm ramp — amber at the left through orange to red at
+ * the right — with unfilled chevrons gray.
  */
 export function chevronColors(frac: number, count: number, mode?: "cancelled"): string[] {
   const filled = Math.round(frac * count);
@@ -127,9 +110,30 @@ export function chevronColors(frac: number, count: number, mode?: "cancelled"): 
   });
 }
 
-/** Agent log timestamps start at 14:32:08 and advance 3s per line. */
-export function logStamp(n: number): string {
-  const base = 14 * 3600 + 32 * 60 + 8 + n * 3;
-  const pad = (x: number) => String(x).padStart(2, "0");
-  return `${pad(Math.floor(base / 3600))}:${pad(Math.floor((base % 3600) / 60))}:${pad(base % 60)}`;
+/** Feed card copy, derived from the activity's own stage — never from the view. */
+export function statusLabels(activity: Activity): { chip: string; bar: string } {
+  if (activity.status === "completed") return { chip: "completed", bar: "complete" };
+  if (activity.status === "cancelled") return { chip: "cancelled", bar: "stopped at shortlist" };
+  switch (activity.stage) {
+    case "search":
+      return { chip: "searching", bar: "searching…" };
+    case "shortlist":
+      return { chip: "awaiting you", bar: "awaiting you…" };
+    case "exec":
+      return { chip: "purchasing", bar: "purchasing…" };
+    default:
+      return { chip: "drafting", bar: "drafting…" };
+  }
+}
+
+export const STAGE_LABELS = [
+  "Discovering",
+  "Analyzing",
+  "Gathering",
+  "Comparing",
+  "Selected",
+] as const;
+
+export function stageLabel(stage: StageIndex): string {
+  return STAGE_LABELS[stage];
 }
