@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "service": "tsx --env-file-if-exists=../../.env src/service/start.ts",
     "demo": "tsx --env-file-if-exists=../../.env demo/run.ts",
     "connect": "tsx demo/connect.ts",
     "disconnect": "tsx demo/disconnect.ts",
