@@ -276,12 +276,13 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     if (!(provider instanceof StraitsXCardProvider)) {
       throw new HttpError(404, "The card rail does not serve reveals.");
     }
+    // Header only: a token in the query string lands in access logs, proxies and referrers.
     const authorization = c.req.header("authorization");
     const token = authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
-      : c.req.query("token");
+      : null;
     const cardId = c.req.param("id");
-    if (!token || !provider.checkGrant(cardId, token)) {
+    if (!token || !provider.consumeGrant(cardId, token)) {
       throw new HttpError(401, "Card grant token is missing or invalid.");
     }
     const material = await revealCard(cardId);
