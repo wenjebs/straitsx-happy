@@ -114,6 +114,23 @@ describe("matching a wishlist item to a product", () => {
     expect(inferCategory("usb-c charging cable")).toBe("electronics");
   });
 
+  /*
+   * A request lands in the right category and then has to pick within it. Shoppers say
+   * "salicylic acid"; shops write "BHA". Without synonyms the pick was near-random inside
+   * skincare — a salicylic acid treatment was answered with a moisturising serum.
+   */
+  it("maps what a shopper says to what a shop writes on the box", () => {
+    expect(matchListing("salicylic acid treatment 2%").listing.title.toLowerCase()).toMatch(
+      /bha|exfoliat|acne|pore/,
+    );
+    expect(matchListing("benzoyl peroxide spot treatment").listing.title.toLowerCase()).toMatch(
+      /acne|spot|clean/,
+    );
+    expect(matchListing("lightweight oil-free moisturizer").listing.title.toLowerCase()).toMatch(
+      /cream|moistur|lotion/,
+    );
+  });
+
   it("offers alternates for the reject-and-re-search path", () => {
     const { alternates } = matchListing("guitar");
     expect(alternates.length).toBeGreaterThan(0);

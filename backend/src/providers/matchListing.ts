@@ -37,6 +37,49 @@ const tokenize = (text: string): string[] =>
 const stem = (w: string) => (w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w);
 
 /**
+ * What a shopper says, mapped to what a shop writes on the box.
+ *
+ * People ask for "salicylic acid" and shops label it "BHA"; people ask for "benzoyl peroxide" and
+ * shops sell an "acne spot gel". Without this the request lands in the right category and then
+ * picks near-randomly within it — a salicylic acid treatment was answered with a moisturising
+ * serum, which is skincare but not the thing.
+ *
+ * One-directional on purpose: expanding the REQUEST, never the product. Expanding both sides makes
+ * everything match everything.
+ */
+const SYNONYMS: Record<string, string[]> = {
+  salicylic: ["bha", "exfoliating", "acne", "pore"],
+  acid: ["exfoliating"],
+  benzoyl: ["acne", "spot", "blemish", "pimple"],
+  peroxide: ["acne", "spot"],
+  moisturizer: ["cream", "moisturizing", "hydrating", "lotion"],
+  moisturiser: ["cream", "moisturizing", "hydrating", "lotion"],
+  hydrating: ["moisturizing"],
+  sunscreen: ["sun", "spf"],
+  spf: ["sun", "sunscreen"],
+  cleanser: ["cleansing", "wash", "foam"],
+  wash: ["cleanser", "cleansing"],
+  towel: ["cloth", "pad", "wipe"],
+  tissue: ["cloth", "pad", "wipe"],
+  exfoliant: ["exfoliating", "scrub", "bha"],
+  headphone: ["earphone", "earbud"],
+  earbud: ["earphone", "headphone"],
+  charger: ["charging", "adapter"],
+  leash: ["collar"],
+  kibble: ["food", "treat"],
+};
+
+/** Expands a request's words with what shops actually call those things. */
+function expand(words: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const w of words) {
+    out.add(w);
+    for (const syn of SYNONYMS[w] ?? []) out.add(stem(syn));
+  }
+  return out;
+}
+
+/**
  * What kind of thing a request is for.
  *
  * Deliberately keyword-driven and readable. A model call here would be more flexible and far
@@ -72,7 +115,7 @@ const CATEGORY_HINTS: Record<Category, string[]> = {
  * never match anything — "cable management" sat in this table for a while matching nothing at all.
  */
 export function inferCategory(text: string): Category | null {
-  const words = new Set(tokenize(text).map(stem));
+  const words = expand(tokenize(text).map(stem));
   let best: { category: Category; hits: number } | null = null;
 
   for (const [category, hints] of Object.entries(CATEGORY_HINTS) as [Category, string[]][]) {
@@ -92,7 +135,7 @@ export type Match = {
 };
 
 export function scoreEntry(itemText: string, entry: CatalogueEntry): Match {
-  const wanted = new Set(tokenize(itemText).map(stem));
+  const wanted = expand(tokenize(itemText).map(stem));
   const titleWords = new Set(tokenize(entry.title).map(stem));
   const keyWords = new Set(entry.keywords.map((k) => stem(k.toLowerCase())));
 
