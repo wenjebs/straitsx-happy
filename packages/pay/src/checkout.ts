@@ -44,6 +44,13 @@ const SELECTORS = {
 
 type FieldHit = { selector: string; sameDocument: boolean };
 
+/** Per-keystroke delay. Tests set CARD_TYPE_DELAY_MS=0; real runs want human-ish timing. */
+const typeDelayMs = () => {
+  const override = process.env.CARD_TYPE_DELAY_MS;
+  if (override !== undefined && override !== "") return Number(override);
+  return 70 + Math.random() * 80;
+};
+
 /**
  * Fills the first matching field, searching the page and then every child frame.
  *
@@ -66,7 +73,13 @@ async function fillFirst(
     for (const [i, scope] of [page, ...children].entries()) {
       const el = scope.locator(sel).first();
       if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
-        await el.fill(value);
+        // Type it rather than fill() it. Setting sixteen digits instantly with no keystrokes is
+        // a named fraud signal — gateways weight "copy-pasted rather than typed" heavily, and a
+        // card they have never seen before is already the riskiest profile they score. Looking
+        // automated does not just risk a decline, it invites the 3DS challenge that kills a
+        // single-use card. Four seconds against a ten-minute TTL is a good trade.
+        await el.click();
+        await el.pressSequentially(value, { delay: typeDelayMs() });
         return { selector: sel, sameDocument: i === 0 };
       }
     }
@@ -127,18 +140,19 @@ export async function payWithCard(
   await fillFirst(page, SELECTORS.name, "Happy Agent");
   material = undefined as any; // drop the reference as soon as the fields are filled
 
+  // Submitting must NOT require a top-level navigation. A gateway's 3DS challenge is a modal
+  // iframe on the same page, so demanding navigation turns every challenge into a 20s timeout,
+  // a cancelled purchase and a stranded card — with confirm() never reaching the settled page.
+  // Invariant 8 still holds: an unknown outcome is still a failure, it is just decided after the
+  // decline check and the caller's gate rather than before them.
+  let submit: Awaited<ReturnType<typeof submitLocator>>;
   try {
-    // waitForLoadState inspects the CURRENT page, which is already loaded, so racing it against
-    // the click resolves instantly and we would read the pre-submit DOM. Wait for the navigation
-    // the submit causes instead.
-    const submit = await submitLocator(page, numberHit, opts.submitSelector);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "load", timeout: 20_000 }),
-      submit.click(),
-    ]);
+    submit = await submitLocator(page, numberHit, opts.submitSelector);
   } catch {
-    return { ok: false, error: "TIMEOUT" };
+    return { ok: false, error: "FIELDS_NOT_FOUND" };
   }
+  await submit.click().catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
 
   // Short timeout: the element is either on the settled page or it is not. Playwright's
   // 30s default would blow the test budget on every failure path.

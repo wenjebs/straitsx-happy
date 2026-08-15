@@ -22,6 +22,7 @@ const wallet = { view: () => ({ balanceCents: 10000, ageMs: 0 }) } as any;
 let server: any, browser: Browser, db: Db, issuer: MockIssuer, purchaseId: string;
 
 beforeAll(async () => {
+  process.env.CARD_TYPE_DELAY_MS = "0"; // real runs type at human speed; tests should not pay for it
   server = serve({ fetch: app.fetch, port: 4031 });
   browser = await chromium.launch();
 });
@@ -158,6 +159,25 @@ describe("card fields inside a gateway iframe (every real PCI checkout)", () => 
     const r = await payWithCard({ db, issuer }, page, purchaseId);
     expect(r.ok).toBe(true);
     expect(r.orderRef).toMatch(/^ord_/); // paid, rather than subscribing to the newsletter
+    await page.close();
+  }, 60_000);
+});
+
+describe("a submit that does not navigate", () => {
+  it("is a challenge or a JS confirmation, not a failure", async () => {
+    const page = await browser.newPage();
+    await page.goto("http://127.0.0.1:4031/checkout-modal?sku=usb-c-hub");
+    const r = await payWithCard({ db, issuer }, page, purchaseId);
+    // demanding a top-level navigation here returned TIMEOUT, and the runner stranded the card
+    expect(r).toEqual({ ok: true, orderRef: "ord_modal01" });
+    await page.close();
+  }, 60_000);
+
+  it("still fails when nothing settles and confirm() cannot prove an order", async () => {
+    const page = await browser.newPage();
+    await page.goto("http://127.0.0.1:4031/item/usb-c-hub"); // no form at all
+    const r = await payWithCard({ db, issuer }, page, purchaseId);
+    expect(r).toEqual({ ok: false, error: "FIELDS_NOT_FOUND" });
     await page.close();
   }, 60_000);
 });

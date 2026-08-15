@@ -90,6 +90,9 @@ Copy `.env.example`. `ISSUER=mock` needs nothing else. Set `ISSUER=straitsx` and
 
 - Card numbers never leave this package. `payWithCard` fills the form itself; no public
   function returns card material, and none of it reaches the audit log.
+- **That rule covers code paths, not screens.** If you drive a remote browser that offers a
+  live view, anyone holding that URL watches the number being typed. Never mint a live-view
+  URL during card entry — hand it out before, or after, never across.
 - Every state change is appended to an audit log you can read back.
 - A crash can't pay twice or lose a payment — a background reconciler settles anything
   in flight against the chain.

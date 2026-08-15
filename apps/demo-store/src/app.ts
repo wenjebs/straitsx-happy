@@ -185,6 +185,36 @@ app.get("/card-frame", (c) =>
   ),
 );
 
+// A checkout that settles WITHOUT a top-level navigation — the shape of a gateway 3DS modal
+// or any JS-driven confirmation. Exists to prove the filler does not treat "no navigation" as
+// failure, which would strand a card at every 3DS-capable merchant.
+app.get("/checkout-modal", (c) => {
+  const item = ITEMS[c.req.query("sku") ?? ""];
+  if (!item) return c.text("not found", 404);
+  return c.html(
+    layout(`
+    <h1>Checkout — ${item.name}</h1>
+    <p data-total-cents="${item.priceCents}">Total: S$${(item.priceCents / 100).toFixed(2)}</p>
+    <form onsubmit="return false;">
+      <label>Card number <input name="cardNumber" autocomplete="cc-number"></label>
+      <label>Expiry <input name="expiry" autocomplete="cc-exp"></label>
+      <label>CVC <input name="cvc" autocomplete="cc-csc"></label>
+      <label>Name <input name="name" autocomplete="cc-name"></label>
+      <button type="submit" id="pay">Pay now</button>
+    </form>
+    <div id="out"></div>
+    <script>
+      document.getElementById('pay').addEventListener('click', function () {
+        setTimeout(function () {
+          document.getElementById('out').innerHTML =
+            '<h1>Order confirmed</h1><p data-order-ref="ord_modal01">Reference: ord_modal01</p>';
+        }, 300);
+      });
+    </script>
+  `),
+  );
+});
+
 app.post("/checkout", async (c) => {
   const form = await c.req.parseBody();
   const framed = String(form.framed ?? "") === "1";

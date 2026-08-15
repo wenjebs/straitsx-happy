@@ -25,7 +25,7 @@ built), `happy-product-spec.md` (Ranen's product draft — direction, not contra
 ## Commands
 
 ```bash
-pnpm test                 # 100 tests. Run from the repo root.
+pnpm test                 # 153 tests. Run from the repo root.
 pnpm typecheck
 pnpm dev                  # demo-store :4030, api :8787
 pnpm format               # ⚠️ reformats unrelated files — revert what isn't yours before staging
@@ -92,7 +92,13 @@ Each was a real bug caught in review. Breaking one costs unrecoverable money.
 8. **Unknown checkout outcome is a failure**, never `ok: true`. Money has already moved.
 9. **No refunds exist.** Money spent with nothing bought is `STRANDED` and stays counted as spent.
 10. **Card material never leaves the library** — not in logs, the audit trail, return values, or
-    anywhere a model prompt could reach.
+    anywhere a model prompt could reach. This governs code paths, not pixels: a remote browser's
+    live view shows the number as it is typed, so never mint one during card entry.
+11. **Never require a top-level navigation after submit.** A gateway's 3DS challenge is a modal
+    iframe on the same page; demanding navigation turns every challenge into a timeout, a
+    cancelled purchase and a stranded card.
+12. **Type card digits, do not `fill()` them.** Instant entry with no keystrokes is a named fraud
+    signal, and the challenge it invites kills a single-use card.
 
 ## Environment
 
@@ -106,7 +112,7 @@ production cardapi = **real money**.
 
 ## State as of 15 Aug
 
-- `main` pushed, 100 tests green, single branch.
+- `main` pushed, 153 tests green, single branch.
 - Payment flow **proven twice on the real sandbox rail**: settled on Fuji, card read, checkout
   completed. Txs `0xa47087a6…`, `0x48cde727…`.
 - Wallet `0xB6A5caA6b11109fd25d856a5a8299eE8f3DB0f2e` — Fuji 20 XSGD left, mainnet 30 untouched.
