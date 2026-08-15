@@ -1,13 +1,13 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Page } from "playwright";
+import { openAiClient, runBrowserAgent } from "./agent.js";
 import { toPaymentPage as reachCheckout } from "./cart.js";
 import { typeCardInto } from "./fill.js";
 import { attachFrames } from "./frames.js";
 import { createJobStore } from "./jobs.js";
 import { createLiveView } from "./liveview.js";
 import { runLogger } from "./log.js";
-import { navigateToPayment } from "./navigator.js";
 import { runPurchase } from "./run.js";
 import { browserForEnv, createPurchaseServer, releaseBrowser } from "./server.js";
 import { readMerchantTotal } from "./total.js";
@@ -85,43 +85,18 @@ async function toPaymentPage(page: Page, job: PurchaseJobInput): Promise<void> {
     log("deterministic path failed, handing over to the navigator", { reason });
   }
 
-  await navigateToPayment(
+  await runBrowserAgent(
     page,
-    { decide: askModel, log },
+    { model: openAiClient(), log },
     {
       allowedHost: new URL(job.listing.url).hostname,
-      goal: `Buy one "${job.item.name}" — the item already in the cart. Reach the card fields.`,
+      goal: `Buy one "${job.item.name}" from this shop for about ${job.listing.price}. Reach the card fields, then stop.`,
     },
   );
 }
 
 const navigatorEnabled = () =>
   process.env.CLOSER_NAVIGATOR !== "off" && Boolean(process.env.OPENAI_API_KEY);
-
-/**
- * Asks the configured model for one browser action.
- *
- * Reuses Happy's OpenAI credentials rather than adding a provider: the same key already drives the
- * planner. Swapping in Bedrock means replacing this function and nothing else.
- */
-async function askModel(prompt: string): Promise<string> {
-  const base = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL ?? "gpt-5.6-luna",
-      messages: [{ role: "user", content: prompt }],
-    }),
-    signal: AbortSignal.timeout(45_000),
-  });
-  if (!res.ok) throw new Error(`navigator model call failed (${res.status})`);
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  return data.choices?.[0]?.message?.content ?? "";
-}
 
 /**
  * The merchant's own total, read from the page it is charging on.

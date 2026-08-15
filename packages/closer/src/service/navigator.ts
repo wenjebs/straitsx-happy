@@ -315,7 +315,7 @@ export function parseAction(raw: string): NavAction | null {
   }
 }
 
-async function hasUsableCardField(page: Page): Promise<boolean> {
+export async function hasUsableCardField(page: Page): Promise<boolean> {
   for (const frame of page.frames()) {
     const el = frame.locator('input[autocomplete="cc-number"]').first();
     if ((await el.count().catch(() => 0)) === 0) continue;
