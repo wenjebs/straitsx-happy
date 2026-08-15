@@ -21,6 +21,7 @@ export function ShortlistScreen({
 }: ShortlistScreenProps) {
   const total = activity.shortlist.reduce((sum, p) => sum + p.listing.amountMinor, 0);
   const headroom = Math.max(0, actCap * 100 - total);
+  const sellers = new Set(activity.shortlist.map((pick) => pick.listing.seller)).size;
 
   return (
     <div className={styles.screen}>
@@ -28,8 +29,9 @@ export function ShortlistScreen({
         <div className="eyebrow">Shortlist</div>
         <h2 className={styles.title}>One pick per item, ready for checkout</h2>
         <p className={styles.lede}>
-          Agents compared 214 listings across 9 sellers. Reject any pick to send its agents back
-          out.
+          {activity.agents.length} scouts browsed verified storefronts live and settled on{" "}
+          {sellers} {sellers === 1 ? "seller" : "sellers"}. Reject any pick to swap in the
+          runner-up they already opened and priced.
         </p>
 
         <div className={styles.list}>

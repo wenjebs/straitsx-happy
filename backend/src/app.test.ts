@@ -12,6 +12,7 @@ import type {
 import { MemoryRepository } from "./repositories/memory.js";
 import { ActivityService } from "./services/activities.js";
 import { PurchaseService } from "./services/purchases.js";
+import { FrameHub } from "./streams.js";
 
 const config: Config = {
   PORT: 8787,
@@ -22,6 +23,12 @@ const config: Config = {
   PUBLIC_BASE_URL: "http://localhost:8787",
   PLANNER_MODE: "remote",
   SCOUT_MODE: "remote",
+  AGENTCORE_BROWSER_ID: "aws.browser.v1",
+  AGENTCORE_SESSION_TIMEOUT_SECONDS: 900,
+  AGENTCORE_MAX_SESSIONS: 4,
+  AGENTCORE_JPEG_QUALITY: 60,
+  SCOUT_SLOTS_PER_ITEM: 2,
+  SCOUT_MAX_TOOL_CALLS: 10,
   OPENAI_MODEL: "gpt-5.6-luna",
   OPENAI_BASE_URL: "https://api.openai.com/v1",
   AGENT_CALLBACK_TOKEN: "callback-secret",
@@ -89,6 +96,7 @@ function harness() {
       purchaseAgents,
       activities,
       purchases,
+      frames: new FrameHub(),
     }),
   };
 }

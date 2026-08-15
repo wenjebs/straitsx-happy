@@ -4,11 +4,18 @@ import { loadConfig } from "./config.js";
 import { EventHub } from "./events.js";
 import {
   DisabledAgentProvider,
-  LocalAgentProvider,
+  LocalPlannerProvider,
   type PlannerProvider,
   RemoteAgentProvider,
   type ScoutProvider,
 } from "./providers/agent.js";
+import { AgentCoreBrowser } from "./providers/agentcoreBrowser.js";
+import { AgentCoreScoutProvider } from "./providers/agentcoreScout.js";
+import {
+  OpenAIScoutBrain,
+  type ScoutBrain,
+  ScriptedScoutBrain,
+} from "./providers/scoutBrain.js";
 import {
   type CardProvider,
   DisabledCardProvider,
@@ -28,11 +35,13 @@ import { MemoryRepository } from "./repositories/memory.js";
 import type { Repository } from "./repository.js";
 import { ActivityService } from "./services/activities.js";
 import { PurchaseService } from "./services/purchases.js";
+import { FrameHub } from "./streams.js";
 
 const config = loadConfig();
 const repository: Repository = createRepository();
 const events = new EventHub();
-const localAgents = new LocalAgentProvider({
+const frames = new FrameHub();
+const localPlanner = new LocalPlannerProvider({
   callbackBaseUrl: config.PUBLIC_BASE_URL,
   ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
 });
@@ -56,13 +65,13 @@ const planner: PlannerProvider =
     : config.PLANNER_MODE === "remote" && remoteAgents
       ? remoteAgents
       : config.PLANNER_MODE === "local"
-        ? localAgents
+        ? localPlanner
         : new DisabledAgentProvider();
 const scouts: ScoutProvider =
   config.SCOUT_MODE === "remote" && remoteAgents
     ? remoteAgents
-    : config.SCOUT_MODE === "local"
-      ? localAgents
+    : config.SCOUT_MODE === "agentcore"
+      ? createAgentCoreScouts()
       : new DisabledAgentProvider();
 const cards: CardProvider =
   config.CARD_MODE === "remote" && config.CARD_API_BASE_URL
@@ -103,6 +112,7 @@ const app = createApp({
   purchaseAgents,
   activities,
   purchases,
+  frames,
 });
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, ({ port }) => {
@@ -116,6 +126,35 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 }
 
 export { app };
+
+function createAgentCoreScouts(): ScoutProvider {
+  const brain: ScoutBrain = config.OPENAI_API_KEY
+    ? new OpenAIScoutBrain({
+        apiKey: config.OPENAI_API_KEY,
+        model: config.OPENAI_MODEL,
+        baseUrl: config.OPENAI_BASE_URL,
+        maxToolCalls: config.SCOUT_MAX_TOOL_CALLS,
+      })
+    : new ScriptedScoutBrain();
+  return new AgentCoreScoutProvider({
+    browser: new AgentCoreBrowser({
+      region: config.AWS_REGION,
+      browserIdentifier: config.AGENTCORE_BROWSER_ID,
+      sessionTimeoutSeconds: config.AGENTCORE_SESSION_TIMEOUT_SECONDS,
+      viewport: { width: 900, height: 620 },
+      jpegQuality: config.AGENTCORE_JPEG_QUALITY,
+      frames,
+    }),
+    brain,
+    callbackBaseUrl: config.PUBLIC_BASE_URL,
+    publicBaseUrl: config.PUBLIC_BASE_URL,
+    ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
+    slotsPerItem: config.SCOUT_SLOTS_PER_ITEM,
+    maxConcurrentSessions: config.AGENTCORE_MAX_SESSIONS,
+    paymentMinMinor: config.PAYMENT_MIN_MINOR,
+    paymentMaxMinor: config.PAYMENT_MAX_MINOR,
+  });
+}
 
 function createRepository(): Repository {
   if (config.DATA_STORE === "memory") return new MemoryRepository();

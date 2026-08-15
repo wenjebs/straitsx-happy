@@ -168,16 +168,19 @@ function AgentTile({ agent, item }: { agent: AgentState; item: WishlistItem }) {
         </div>
 
         {agent.liveStreamUrl ? (
-          <iframe
+          /*
+           * The backend serves this as MJPEG, so an <img> is the whole player — the browser
+           * swaps each frame in as it arrives. It is an image, not a document, which is why
+           * there is no iframe and nothing to sandbox.
+           */
+          <img
             className={styles.liveFrame}
             src={agent.liveStreamUrl}
-            title={`Live browser stream for ${agent.agentId}`}
-            sandbox="allow-scripts allow-same-origin"
-            allow="autoplay; fullscreen"
+            alt={`Live browser view for ${agent.agentId}`}
             referrerPolicy="no-referrer"
           />
         ) : (
-          <div className={styles.streamWaiting}>waiting for live browser stream…</div>
+          <div className={styles.streamWaiting}>starting browser session…</div>
         )}
       </div>
 

@@ -253,12 +253,15 @@
   text-overflow: ellipsis;
 }
 
+/* MJPEG frames from the scout's AgentCore browser. Contain, so a 900x620 capture
+   is letterboxed into the tile rather than cropped to its centre. */
 .liveFrame {
   display: block;
   width: 100%;
   height: calc(100% - 27px);
   border: 0;
   background: #f5f5f6;
+  object-fit: contain;
 }
 
 .streamWaiting {

@@ -11,12 +11,11 @@ interface ConnectionBannerProps {
 /**
  * Surfaces transport trouble without tearing the view down.
  *
- * Deliberately never falls back to mock data when a configured backend is
- * unreachable: silently swapping real agent state for a simulation would be
- * misleading at any time, and dangerous on a rail that spends real money.
+ * There is nothing to fall back to and that is the point: silently swapping real
+ * agent state for a simulation would be misleading at any time, and dangerous on
+ * a rail that spends real money. An unreachable backend says so.
  */
 export function ConnectionBanner({ connection, error, onDismiss }: ConnectionBannerProps) {
-  if (connection === "mock" && !error) return null;
   if (connection === "open" && !error) return null;
 
   const tone =
