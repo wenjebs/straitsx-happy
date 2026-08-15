@@ -48,7 +48,7 @@ const Env = z
     COGNITO_USER_POOL_ID: optionalString,
     COGNITO_CLIENT_ID: optionalString,
     PLANNER_MODE: z.enum(["local", "openai", "remote", "disabled"]).default("local"),
-    SCOUT_MODE: z.enum(["agentcore", "remote", "disabled"]).default("disabled"),
+    SCOUT_MODE: z.enum(["agentcore", "remote", "disabled"]).default("agentcore"),
     /** AgentCore Browser. Credentials come from the ambient AWS chain, never from this file. */
     AGENTCORE_BROWSER_ID: z.string().min(1).default("aws.browser.v1"),
     AGENTCORE_SESSION_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),

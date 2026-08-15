@@ -42,6 +42,28 @@ resource "aws_iam_role" "backend_task" {
   tags = local.common_tags
 }
 
+# Scouts drive a Bedrock AgentCore browser session per shopping slot. The session ids are minted
+# per run, so the actions cannot be scoped to a fixed resource ARN.
+resource "aws_iam_role_policy" "backend_agentcore" {
+  name = "agentcore-browser"
+  role = aws_iam_role.backend_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:StopBrowserSession",
+        "bedrock-agentcore:GetBrowserSession",
+        "bedrock-agentcore:ListBrowserSessions",
+        "bedrock-agentcore:ConnectBrowserAutomationStream",
+        "bedrock-agentcore:ConnectBrowserLiveViewStream"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "backend_dynamodb" {
   name = "dynamodb-data"
   role = aws_iam_role.backend_task.id

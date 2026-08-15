@@ -97,7 +97,7 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "PLANNER_MODE", value = "openai" },
       { name = "OPENAI_MODEL", value = var.openai_model },
       { name = "OPENAI_BASE_URL", value = "https://api.openai.com/v1" },
-      { name = "SCOUT_MODE", value = var.agent_api_base_url != "" ? "remote" : "disabled" },
+      { name = "SCOUT_MODE", value = var.agent_api_base_url != "" ? "remote" : "agentcore" },
       { name = "AGENT_API_BASE_URL", value = var.agent_api_base_url },
       { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : "disabled" },
       { name = "CARD_API_BASE_URL", value = var.card_api_base_url },

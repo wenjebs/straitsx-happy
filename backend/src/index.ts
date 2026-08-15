@@ -75,12 +75,14 @@ const planner: PlannerProvider =
       : config.PLANNER_MODE === "local"
         ? localPlanner
         : new DisabledAgentProvider();
+// AgentCore is the fallback, not "disabled": a dispatch that answers 503 instead of opening a
+// browser is never what we want, and SCOUT_MODE=disabled has to be asked for explicitly.
 const scouts: ScoutProvider =
   config.SCOUT_MODE === "remote" && remoteAgents
     ? remoteAgents
-    : config.SCOUT_MODE === "agentcore"
-      ? createAgentCoreScouts()
-      : new DisabledAgentProvider();
+    : config.SCOUT_MODE === "disabled"
+      ? new DisabledAgentProvider()
+      : createAgentCoreScouts();
 const cards: CardProvider =
   config.CARD_MODE === "remote" && config.CARD_API_BASE_URL
     ? new RemoteCardProvider({
