@@ -19,10 +19,18 @@ export const demoStoreAdapter: MerchantAdapter = {
     if (!page.url().includes("/checkout")) {
       await page.locator('a[href^="/checkout"]').first().click();
     }
-    await page
-      .locator('input[autocomplete="cc-number"]')
-      .first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    // The card fields may sit in a gateway iframe — Shopify serves them from
+    // checkout.pci.shopifyinc.com, and every PCI-compliant checkout does something similar. A
+    // page-level wait finds nothing there, so look in every frame before declaring the page ready.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      for (const frame of page.frames()) {
+        const field = frame.locator('input[autocomplete="cc-number"]').first();
+        if ((await field.count()) > 0 && (await field.isVisible().catch(() => false))) return;
+      }
+      if (Date.now() > deadline) throw new Error("no card field in any frame of this page");
+      await page.waitForTimeout(250);
+    }
   },
 
   async readFinalTotalCents(page) {
