@@ -373,6 +373,13 @@ The card exists. There is no way back. Every branch below either gets the goods 
 | `{ok:false, error:'FIELDS_NOT_FOUND'}` | `cancel(id,'fields_not_found')` | `stranded` |
 | `{ok:false, error:'CARD_UNREADABLE'}` | `cancel(id,'card_unreadable')` | `stranded` |
 | `payWithCard` throws | `cancel(id,'checkout_threw')` | `stranded` |
+| anything else throws after issuance — including `cancel` or a journal write | best-effort `cancel`, then record `unknown` and abort the run | `unknown` |
+
+That last row is the safety net that keeps the invariant "no failure path abandons a live card"
+true by construction rather than by inspection: the whole post-issuance block sits inside a
+`try/catch`, so there is no escape from it that skips recording an outcome. An exception thrown
+between issuance and a terminal write would otherwise reject `run()` with the journal still
+`running`, which both loses the record of spent money and permanently blocks the activity.
 
 Notes that matter:
 
@@ -394,6 +401,7 @@ Notes that matter:
 | Failure | Action |
 |---|---|
 | Browser dies mid-run | if a purchase is `CARD_ISSUED`, `cancel` → `STRANDED` and log; then abort |
+| The Closer itself throws (a defect) | record the item `unknown`, abort, and still finalise the journal — a `running` journal blocks every future run of that activity |
 | Journal write fails | abort **before** the step it was protecting; never proceed unjournalled into Z4 |
 | Duplicate key while running | return the in-flight promise |
 | New key on a completed activity | reject with `'this activity has already been purchased'` |
@@ -410,18 +418,24 @@ collapses the animation). The Closer never emits on a timer and never re-emits a
 | 0 | `{step:0,state:'queued'}` | — |
 | 1 | `{step:1,state:'live'}` | `127.0.0.1/checkout · total S$29.00` |
 | 2 | `{step:2,state:'live'}` | `card •••• 4402 issued · limit S$29.00` |
-| 3 | `{step:3,state:'live'}` | `placing order S$29.00` |
+| 3 | `{step:3,state:'live'}` | `127.0.0.1/checkout · placing order S$29.00` |
 | 4 | `{step:4,state:'purchased'}` | `order #ord_1a2b3c confirmed · card spent` |
 
-The contract's example reads `card 4319 4400 issued`, i.e. first four and last four. **We only ever
-have the last four** — `@happy/pay` returns `last4` and nothing else, by design (invariant 10:
-card material never leaves the library). The mask is `•••• 4402`. This is a deliberate, visible
-difference from the mock's line and should not be "fixed" by finding a way to surface a BIN.
+Two deliberate departures from the contract's suggested lines:
+
+- The contract's example reads `card 4319 4400 issued`, i.e. first four and last four. **We only
+  ever have the last four** — `@happy/pay` returns `last4` and nothing else, by design (invariant
+  10: card material never leaves the library). The mask is `•••• 4402`. This should not be "fixed"
+  by finding a way to surface a BIN.
+- The contract suggests a separate `… · autofill ok` line before `placing order`. `payWithCard`
+  fills **and** submits in one call, so there is no moment at which the Closer knows the fill
+  succeeded but the order has not been placed. A line claiming otherwise would be a guess. Step 3
+  says what is actually about to happen.
 
 Failure and skip lines use `tag: 'SYS'`, `hueIndex: 0`:
 
 ```
-gpu skipped · S$429.00 is over the S$30 card ceiling
+gpu skipped · S$429.00 is over the S$30.00 card ceiling
 ssd skipped · merchant needs a login
 S$29.00 spent · no order confirmation · card •••• 4402 stranded
 settlement outcome unknown · run stopped · reconciler will resolve pur_9f3c
@@ -583,6 +597,10 @@ marked as not delivered, so the total and the line items agree.
 *Cost if wrong:* if the product prefers "total value of goods received", the two numbers diverge
 from the wallet and the demo has to explain why the balance dropped further than the total. Chosen
 deliberately: the wallet is the thing the judges can verify on-chain.
+
+An `unknown` item is excluded from `totalMinor`, because nobody yet knows whether its money left.
+`@happy/pay`'s reconciler settles it against the chain; the API should rebuild the wallet after
+that rather than trusting the total from the aborted run.
 
 ---
 
