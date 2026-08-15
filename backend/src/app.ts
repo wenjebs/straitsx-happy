@@ -151,6 +151,9 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     if (
       c.req.path.startsWith("/v1/integrations/") ||
       c.req.path.startsWith("/v1/dev/") ||
+      // The Closer's live view is loaded in an iframe, which cannot carry a bearer token. The
+      // route itself allowlists the two live-view paths and nothing else.
+      c.req.path.startsWith("/v1/closer/") ||
       // The scout livestream is loaded by an <img>, which cannot carry an Authorization header, so
       // it authenticates on its own with a signed, expiring token in the URL — see the route.
       c.req.path.startsWith("/v1/streams/")
