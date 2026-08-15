@@ -6,6 +6,8 @@ import type { PlannerProvider } from "./agent.js";
 
 const PLANNER_INSTRUCTIONS = [
   "You are Happy's shopping planner. Convert the user's request into a practical editable wishlist of separate purchasable items.",
+  "Wishlist rows represent distinct required item types or explicit quantities, never alternative recommendations. A request for one product, such as 'I want a computer mouse', must return exactly one wishlist item. Never create separate wishlist rows for competing brands, models, styles, colours, or feature variants; Scouts compare those candidates later.",
+  "Do not introduce any brand or model that the user did not explicitly name. Keep the initial wishlist name, specification, and reply brand-neutral. If brand preference would help, ask it only as an optional clarification after wishlist approval and include a no-preference option.",
   "For any build, DIY, setup, kit, or outcome request, return a complete starter bill of materials: decompose the outcome into its individual components, materials, consumables, and essential tools, like the individual parts in a PC build.",
   "Never return one generic project, bundle, or pending-details placeholder and never postpone the wishlist until the user supplies more detail.",
   "When details are missing, choose common practical defaults, state the assumptions in the reply and item specifications, and still return an actionable list.",
@@ -135,7 +137,10 @@ export class OpenAIPlannerProvider implements PlannerProvider {
       );
     }
     const data: unknown = await response.json();
-    const plan = PlannedWishlist.parse(JSON.parse(extractOutputText(data)));
+    const plan = normalizePlanForGoal(
+      PlannedWishlist.parse(JSON.parse(extractOutputText(data))),
+      goal,
+    );
     const ids = plan.wishlist.map((item, index) => itemId(item.name, index));
     if (plan.clarifications.some((row) => row.itemIndex >= ids.length)) {
       throw new Error("OpenAI returned a clarification outside the wishlist.");
@@ -216,6 +221,66 @@ function itemId(name: string, index: number): string {
 
 function normalizeShort(value: string): string {
   return Array.from(value.trim().replace(/\s+/g, " ").toUpperCase()).slice(0, 16).join("");
+}
+
+type PlannedWishlistData = z.infer<typeof PlannedWishlist>;
+
+/**
+ * A model can mistake alternatives for required items (for example, five mouse brands). Direct
+ * singular requests have an unambiguous cardinality, so enforce it before the plan is persisted.
+ * Deriving the display copy from the user's own words also prevents unsolicited brands or models
+ * from leaking into the initial wishlist; any model-proposed preference remains in clarification.
+ */
+function normalizePlanForGoal(plan: PlannedWishlistData, goal: string): PlannedWishlistData {
+  const itemName = directSingleItemName(goal);
+  const first = plan.wishlist[0];
+  if (!itemName || !first) return plan;
+
+  const clarification = plan.clarifications[0];
+  return {
+    ...plan,
+    title: itemName,
+    reply: `I prepared one wishlist item for ${itemName}. Optional preferences can be confirmed during clarification.`,
+    wishlist: [
+      {
+        ...first,
+        name: itemName,
+        short: itemName,
+        spec: `Match the requested ${itemName.toLocaleLowerCase("en-SG")} and every constraint stated by the user. Unspecified preferences remain open for clarification.`,
+      },
+    ],
+    clarifications: clarification ? [{ ...clarification, itemIndex: 0 }] : [],
+  };
+}
+
+function directSingleItemName(goal: string): string | null {
+  const normalized = goal.trim().replace(/\s+/g, " ");
+  const prefix = normalized.match(
+    /^(?:please\s+)?(?:(?:i\s+)?(?:want|need|would\s+like)(?:\s+to\s+(?:buy|get|find|order))?|(?:can|could)\s+you\s+(?:buy|get|find|order)|(?:buy|get|find|order)(?:\s+me)?)\s+(?:a|an|one)\s+/i,
+  );
+  if (!prefix) return null;
+
+  let item = normalized.slice(prefix[0].length).trim();
+  if (
+    /\b(?:and|plus|along\s+with|as\s+well\s+as)\b/i.test(item) ||
+    /[,;]/.test(item) ||
+    /\bwith\s+(?:a|an|one|some|\d+)\b/i.test(item) ||
+    /\b(?:build|assemble|make|set\s*up|diy|project|kit|materials|supplies|parts)\b/i.test(item)
+  ) {
+    return null;
+  }
+
+  item = item
+    .replace(
+      /\s+(?:for\s+)?(?:under|below|within|up\s+to|no\s+more\s+than|less\s+than)\s+(?:s\$|sgd|\$)\s*\d.*$/i,
+      "",
+    )
+    .replace(/\s+please[.!?]?$/i, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  if (!item) return null;
+
+  return `${item.charAt(0).toLocaleUpperCase("en-SG")}${item.slice(1)}`.slice(0, 240);
 }
 
 const wishlistJsonSchema = {
