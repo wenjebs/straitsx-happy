@@ -31,6 +31,10 @@ function checkoutOptsFor(a: MerchantAdapter): CheckoutOptions {
   };
 }
 
+const reasonText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const mandateReason = (e: unknown) =>
+  e && typeof e === "object" && "reason" in e ? String((e as { reason: unknown }).reason) : null;
+
 export type CloserDeps = {
   browser: BrowserLike;
   onEvent: (e: CloserEvent) => void;
@@ -111,49 +115,132 @@ export function createCloser(deps: CloserDeps) {
     rec: JournalRecord,
   ): Promise<ItemOutcome> {
     const url = new URL(sel.url);
-    const adapter = adapters.find((a) => a.matches(url)) as MerchantAdapter;
-    const item: JournalItem = { itemId: sel.itemId, state: "reserving" };
+    const adapter = adapters.find((a) => a.matches(url));
+    const item: JournalItem = { itemId: sel.itemId, state: "skipped" };
     rec.items.push(item);
     journal.write(rec);
+
+    const skip = (reason: string, text: string): ItemOutcome => {
+      item.state = "skipped";
+      item.reason = reason;
+      journal.write(rec);
+      log("SYS", hue, text);
+      return { itemId: sel.itemId, status: "skipped", reason };
+    };
+
+    if (!adapter)
+      return skip("NO_ADAPTER", `${sel.itemId} skipped · no adapter for ${url.hostname}`);
 
     const deadlineAt = now() + preIssueBudgetMs;
     const page = await deps.browser.newPage();
     try {
-      // --- Z1: navigate and read the real total. Free to fail. -------------------------------
-      await page.goto(sel.url, { waitUntil: "load", timeout: 20_000 });
-      await adapter.toPaymentPage(page, { shipping, log: (t) => log(tag, hue, t), deadlineAt });
-      const total = await adapter.readFinalTotalCents(page);
+      // --- Z1: navigate and read the real total. Everything here is free to fail. -------------
+      const ctx = { shipping, log: (t: string) => log(tag, hue, t), deadlineAt };
+      const reach = async () => {
+        await page.goto(sel.url, { waitUntil: "load", timeout: 20_000 });
+        await adapter.toPaymentPage(page, ctx);
+        return adapter.readFinalTotalCents(page);
+      };
+      let total: number;
+      try {
+        total = await reach();
+      } catch {
+        // One retry, here and nowhere else. Before issuance a retry costs nothing; after it, a
+        // retry is only ever @happy/pay replaying its own stored envelope (invariants 2 and 3).
+        try {
+          total = await reach();
+        } catch (err) {
+          return skip("PRECHECK_FAILED", `${sel.itemId} skipped · ${reasonText(err)}`);
+        }
+      }
+      if (!Number.isInteger(total) || total <= 0)
+        return skip("TOTAL_UNREADABLE", `${sel.itemId} skipped · could not read a total`);
+      if (now() > deadlineAt)
+        return skip("TIMEOUT_PRE_ISSUE", `${sel.itemId} skipped · took too long before issuing`);
+
       const here = new URL(page.url());
       // The merchant host comes from the URL, never from page content. Spec §12.
       const merchantHost = here.hostname.toLowerCase();
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 1, state: "live" } });
       log(tag, hue, `${merchantHost}${here.pathname} · total ${sgd(total)}`);
 
-      // --- Z2: hold the budget. Still no money moved. ------------------------------------------
+      // --- Z2: the mandate decides. Still no money moved. -------------------------------------
+      const m = await pay.getMandate();
+      if (!m) return skip("MANDATE_INACTIVE", `${sel.itemId} skipped · no active mandate`);
+      if (total < m.limits.minCardCents)
+        return skip(
+          "BELOW_RAIL_MINIMUM",
+          `${sel.itemId} skipped · ${sgd(total)} is under the ${sgd(m.limits.minCardCents)} card floor`,
+        );
+      if (total > m.limits.maxCardCents)
+        return skip(
+          "ABOVE_RAIL_MAXIMUM",
+          `${sel.itemId} skipped · ${sgd(total)} is over the ${sgd(m.limits.maxCardCents)} card ceiling`,
+        );
+
       const quote = {
         amountCents: total,
         merchantHost,
         itemName: sel.itemName ?? sel.itemId,
         productUrl: sel.url,
       };
-      await pay.getMandate();
-      await pay.evaluate(quote);
-      const purchase = await pay.reserve(quote);
+      const d = await pay.evaluate(quote);
+      if (d.decision === "NEEDS_HUMAN")
+        // No endpoint in BACKEND_CONTRACT.md can call approve(), and the run is unattended.
+        return skip(
+          "NEEDS_HUMAN",
+          `${sel.itemId} skipped · ${sgd(total)} needs a human (${d.reason})`,
+        );
+      if (d.decision === "DENY")
+        return skip(d.reason, `${sel.itemId} skipped · mandate says ${d.reason}`);
+
+      item.state = "reserving";
+      journal.write(rec);
+      let purchase: { id: string };
+      try {
+        purchase = await pay.reserve(quote);
+      } catch (err) {
+        return skip(
+          mandateReason(err) ?? "RESERVE_FAILED",
+          `${sel.itemId} skipped · could not hold budget (${reasonText(err)})`,
+        );
+      }
       item.state = "reserved";
       item.purchaseId = purchase.id;
       item.amountMinor = total;
       journal.write(rec);
 
+      // --- Z3: the last exit that costs nothing. ----------------------------------------------
+      // Between the Z1 read and the mint there is a reserve round-trip and, on a real merchant,
+      // often a shipping selection that rewrites the total. Re-reading turns "minted a card for
+      // the wrong amount" into a free skip.
+      const again = await adapter.readFinalTotalCents(page).catch(() => null);
+      const ceiling = total + Math.floor((total * 200) / 10_000); // PRICE_TOLERANCE_BPS
+      const bad =
+        again === null ||
+        !Number.isInteger(again) ||
+        again > ceiling ||
+        again < m.limits.minCardCents ||
+        again > m.limits.maxCardCents;
+      if (bad) {
+        await pay.cancel(purchase.id, "price_changed"); // RESERVED → RELEASED; the last free exit
+        return skip(
+          "PRICE_CHANGED",
+          `${sel.itemId} skipped · total moved to ${again === null ? "unreadable" : sgd(again)}`,
+        );
+      }
+      const finalCents = again;
+
       // --- Z4: irreversible. The journal records the intent before the money moves. -----------
       item.state = "issuing";
       journal.write(rec);
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 2, state: "live" } });
-      const card = await pay.issueCard(purchase.id, total);
-      log(tag, hue, `card ${mask(card.last4)} issued · limit ${sgd(total)}`);
+      const card = await pay.issueCard(purchase.id, finalCents);
+      log(tag, hue, `card ${mask(card.last4)} issued · limit ${sgd(finalCents)}`);
 
       // --- Z5/Z6: no way back. -----------------------------------------------------------------
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 3, state: "live" } });
-      log(tag, hue, `${merchantHost}${here.pathname} · placing order ${sgd(total)}`);
+      log(tag, hue, `${merchantHost}${here.pathname} · placing order ${sgd(finalCents)}`);
       const res = await pay.payWithCard(page, purchase.id, checkoutOptsFor(adapter));
       const orderRef = res.orderRef ?? null;
       await pay.complete(purchase.id, orderRef);
@@ -167,7 +254,7 @@ export function createCloser(deps: CloserDeps) {
         status: "purchased",
         purchaseId: purchase.id,
         orderRef,
-        amountMinor: total,
+        amountMinor: finalCents,
         last4: card.last4,
       };
     } finally {
