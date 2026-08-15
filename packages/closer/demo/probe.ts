@@ -32,7 +32,8 @@ const BUY = /buy now|add to cart|checkout|proceed to (pay|checkout)|continue to 
  * buttons are the irreversible one — the probe would buy something with the user's own money while
  * pretending to be read-only.
  */
-const NEVER = /place order|pay now|confirm (order|payment)|complete purchase|submit order/i;
+const NEVER =
+  /place order|pay now|make payment|confirm (order|payment)|complete purchase|submit order|pay with/i;
 
 const context = connected
   ? await store.contextFor(host)
