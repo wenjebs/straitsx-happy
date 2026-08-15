@@ -26,7 +26,7 @@ const initialState: HappyState = {
   mandate: null,
   settings: null,
   profile: null,
-  connection: Api.isLive() ? "connecting" : "mock",
+  connection: Api.isLive() ? "connecting" : "error",
   error: null,
   loading: true,
 };
@@ -206,7 +206,7 @@ export function useHappy(): Happy {
           settings,
           profile,
           loading: false,
-          connection: Api.isLive() ? "open" : "mock",
+          connection: Api.isLive() ? "open" : "error",
         });
       } catch (e) {
         if (!cancelled) {

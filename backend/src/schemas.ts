@@ -148,6 +148,16 @@ export const AgentCallbackEvent = z.discriminatedUnion("type", [
       .max(10),
   }),
   z.object({
+    type: z.literal("log.line"),
+    line: z.object({
+      id: z.string().min(1).max(160),
+      ts: z.string().max(20),
+      tag: z.string().max(24),
+      hueIndex: z.number().int().min(0).max(5),
+      text: z.string().min(1).max(500),
+    }),
+  }),
+  z.object({
     type: z.literal("message.appended"),
     message: z.object({
       id: z.string().min(1).max(160),

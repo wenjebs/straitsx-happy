@@ -1,23 +1,20 @@
 /*
- * Every call the UI makes to the backend, and the switch between the real API
- * and the in-browser mock.
+ * Every call the UI makes to the backend.
  *
- *   VITE_API_BASE_URL set    -> live HTTP + SSE against that origin
- *   VITE_API_BASE_URL unset  -> lib/mockBackend.ts, entirely in the browser
- *
- * Both modes return the same shapes and emit the same event stream, so the UI
- * runs identical code either way. That is deliberate: it means live mode is not
- * a second, less-exercised path that only gets tested the day it is switched on.
+ * There is one mode: live HTTP + SSE against VITE_API_BASE_URL. There used to be
+ * a second — an in-browser mock that advanced the whole flow on timers — and it
+ * is gone. The search phase now runs real browsers over real storefronts, so a
+ * simulation of it could only ever disagree with the thing it simulated, and a
+ * screen full of invented listings is worse than a screen that says the backend
+ * is not running.
  *
  * The wire contract these functions assume is written out in full in
  * ../BACKEND_CONTRACT.md. Change one, change the other.
  */
 
-import { mockBackend } from "./mockBackend";
-
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "";
 
-/** True when a backend origin is configured. */
+/** True when a backend origin is configured. Nothing works without one. */
 export function isLive(): boolean {
   return API_BASE_URL.length > 0;
 }
@@ -331,7 +328,7 @@ export type ActivityEvent =
   | { type: "activity.completed"; completedAt: string; totalMinor: number }
   | { type: "wallet.updated"; wallet: Wallet };
 
-export type ConnectionState = "mock" | "connecting" | "open" | "error";
+export type ConnectionState = "connecting" | "open" | "error";
 
 export interface Subscription {
   close: () => void;
@@ -366,6 +363,12 @@ function authHeaders(): Record<string, string> {
 }
 
 async function request<T>(path: string, init?: RequestInit, retryAuth = true): Promise<T> {
+  if (!isLive()) {
+    throw new ApiError(
+      0,
+      "VITE_API_BASE_URL is not set, so there is no backend to talk to. Start the backend and point the frontend at it.",
+    );
+  }
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -491,66 +494,56 @@ export async function logout(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export function listActivities(): Promise<Activity[]> {
-  return isLive() ? get("/v1/activities") : mockBackend.listActivities();
+  return get("/v1/activities");
 }
 
 export function getActivity(id: string): Promise<Activity> {
-  return isLive() ? get(`/v1/activities/${id}`) : mockBackend.getActivity(id);
+  return get(`/v1/activities/${id}`);
 }
 
 export function getActivityHistory(id: string): Promise<ActivityCheckpoint[]> {
-  return isLive() ? get(`/v1/activities/${id}/checkpoints`) : mockBackend.getActivityHistory(id);
+  return get(`/v1/activities/${id}/checkpoints`);
 }
 
 /** Starts a new activity from a free-text goal. Returns it already in `wishlist`. */
 export function createActivity(goal: string): Promise<Activity> {
-  return isLive() ? post("/v1/activities", { goal }) : mockBackend.createActivity(goal);
+  return post("/v1/activities", { goal });
 }
 
 export function addWishlistItem(id: string, name: string): Promise<Activity> {
-  return isLive()
-    ? post(`/v1/activities/${id}/wishlist/items`, { name })
-    : mockBackend.addWishlistItem(id, name);
+  return post(`/v1/activities/${id}/wishlist/items`, { name });
 }
 
 export function removeWishlistItem(id: string, itemId: string): Promise<Activity> {
-  return isLive()
-    ? request(`/v1/activities/${id}/wishlist/items/${itemId}`, { method: "DELETE" })
-    : mockBackend.removeWishlistItem(id, itemId);
+  return request(`/v1/activities/${id}/wishlist/items/${itemId}`, { method: "DELETE" });
 }
 
 export function approveWishlist(id: string): Promise<Activity> {
-  return isLive() ? post(`/v1/activities/${id}/wishlist/approve`) : mockBackend.approveWishlist(id);
+  return post(`/v1/activities/${id}/wishlist/approve`);
 }
 
 /** Returns curation to the editable wishlist and discards all option choices. */
 export function reopenWishlist(id: string): Promise<Activity> {
-  return isLive() ? post(`/v1/activities/${id}/wishlist/reopen`) : mockBackend.reopenWishlist(id);
+  return post(`/v1/activities/${id}/wishlist/reopen`);
 }
 
 /** Locks one curator option for an item. */
 export function chooseOption(id: string, itemId: string, option: string): Promise<Activity> {
-  return isLive()
-    ? post(`/v1/activities/${id}/clarifications/${itemId}`, { option })
-    : mockBackend.chooseOption(id, itemId, option);
+  return post(`/v1/activities/${id}/clarifications/${itemId}`, { option });
 }
 
-/** Dispatches the agents and begins the multi-agent search. */
+/** Dispatches the scouts and begins the multi-agent search on real browsers. */
 export function dispatchAgents(id: string): Promise<Activity> {
-  return isLive() ? post(`/v1/activities/${id}/dispatch`) : mockBackend.dispatchAgents(id);
+  return post(`/v1/activities/${id}/dispatch`);
 }
 
 export function setSearchPlaying(id: string, playing: boolean): Promise<Activity> {
-  return isLive()
-    ? post(`/v1/activities/${id}/search/${playing ? "resume" : "pause"}`)
-    : mockBackend.setSearchPlaying(id, playing);
+  return post(`/v1/activities/${id}/search/${playing ? "resume" : "pause"}`);
 }
 
-/** Rejects a shortlist pick and sends its agents back out for the alternate. */
+/** Rejects a shortlist pick and promotes the alternate the scouts already priced. */
 export function rejectPick(id: string, itemId: string): Promise<Activity> {
-  return isLive()
-    ? post(`/v1/activities/${id}/shortlist/${itemId}/reject`)
-    : mockBackend.rejectPick(id, itemId);
+  return post(`/v1/activities/${id}/shortlist/${itemId}/reject`);
 }
 
 /**
@@ -561,14 +554,12 @@ export function rejectPick(id: string, itemId: string): Promise<Activity> {
  * click, refresh mid-flight) into one execution rather than two.
  */
 export function confirmPurchase(id: string, idempotencyKey: string): Promise<Activity> {
-  return isLive()
-    ? post(`/v1/activities/${id}/purchase`, { idempotencyKey })
-    : mockBackend.confirmPurchase(id);
+  return post(`/v1/activities/${id}/purchase`, { idempotencyKey });
 }
 
 /** Stops all future work for a live activity and rejects late agent callbacks. */
 export function cancelActivity(id: string): Promise<Activity> {
-  return isLive() ? post(`/v1/activities/${id}/cancel`) : mockBackend.cancelActivity(id);
+  return post(`/v1/activities/${id}/cancel`);
 }
 
 // ---------------------------------------------------------------------------
@@ -588,8 +579,8 @@ export function subscribeToActivity(
   onState?: (state: ConnectionState) => void,
 ): Subscription {
   if (!isLive()) {
-    onState?.("mock");
-    return mockBackend.subscribe(id, onEvent);
+    onState?.("error");
+    return { close: () => {} };
   }
 
   const types: ActivityEvent["type"][] = [
@@ -687,7 +678,7 @@ function dispatchSseFrame(
 // ---------------------------------------------------------------------------
 
 export function getWallet(): Promise<Wallet> {
-  return isLive() ? get("/v1/wallet") : mockBackend.getWallet();
+  return get("/v1/wallet");
 }
 
 export interface WalletAuthChallenge {
@@ -762,21 +753,21 @@ export function refreshWalletDeposit(txHash: string): Promise<WalletDepositResul
 }
 
 export function getMandate(): Promise<Mandate> {
-  return isLive() ? get("/v1/mandate") : mockBackend.getMandate();
+  return get("/v1/mandate");
 }
 
 export function updateMandate(changes: Partial<Mandate>): Promise<Mandate> {
-  return isLive() ? patch("/v1/mandate", changes) : mockBackend.updateMandate(changes);
+  return patch("/v1/mandate", changes);
 }
 
 export function getSettings(): Promise<Settings> {
-  return isLive() ? get("/v1/settings") : mockBackend.getSettings();
+  return get("/v1/settings");
 }
 
 export function updateSettings(changes: Partial<Settings>): Promise<Settings> {
-  return isLive() ? patch("/v1/settings", changes) : mockBackend.updateSettings(changes);
+  return patch("/v1/settings", changes);
 }
 
 export function getProfile(): Promise<Profile> {
-  return isLive() ? get("/v1/profile") : mockBackend.getProfile();
+  return get("/v1/profile");
 }

@@ -25,14 +25,51 @@ const Env = z
     DYNAMODB_TABLE: optionalString,
     DYNAMODB_ENDPOINT: optionalUrl,
     AWS_REGION: z.string().default("ap-southeast-1"),
-    FRONTEND_ORIGIN: z.string().default("http://localhost:4040"),
+    /**
+     * Allowed browser origins, comma-separated.
+     *
+     * A list rather than one value because the single value is a trap: the laptop's LAN address
+     * changes with DHCP, and a demo is watched on `localhost` while a phone on the same network
+     * uses the IP. Either way the frontend has no mock to fall back to, so the wrong origin here
+     * is a blank screen with a CORS error rather than a degraded UI.
+     */
+    FRONTEND_ORIGIN: z
+      .string()
+      .default("http://localhost:4040")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((origin) => origin.trim().replace(/\/$/, ""))
+          .filter(Boolean),
+      ),
     PUBLIC_BASE_URL: z.url().default("http://localhost:8787"),
     AUTH_MODE: z.enum(["disabled", "local", "cognito"]).default("local"),
     AUTH_SESSION_SECRET: optionalSecret,
     COGNITO_USER_POOL_ID: optionalString,
     COGNITO_CLIENT_ID: optionalString,
     PLANNER_MODE: z.enum(["local", "openai", "remote", "disabled"]).default("local"),
-    SCOUT_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
+    SCOUT_MODE: z.enum(["agentcore", "remote", "disabled"]).default("disabled"),
+    /** AgentCore Browser. Credentials come from the ambient AWS chain, never from this file. */
+    AGENTCORE_BROWSER_ID: z.string().min(1).default("aws.browser.v1"),
+    AGENTCORE_SESSION_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+    /** One AgentCore session per concurrent scout, so this is the real cost dial. */
+    AGENTCORE_MAX_SESSIONS: z.coerce.number().int().min(1).max(12).default(4),
+    AGENTCORE_JPEG_QUALITY: z.coerce.number().int().min(20).max(95).default(60),
+    /**
+     * Signs the scout livestream's capability URLs. Defaults to a per-boot random value, which is
+     * correct for one task; set it when several instances serve the same activity.
+     */
+    STREAM_TOKEN_SECRET: optionalString,
+    SCOUT_SLOTS_PER_ITEM: z.coerce.number().int().min(1).max(4).default(2),
+    SCOUT_MAX_TOOL_CALLS: z.coerce.number().int().min(2).max(24).default(10),
+    /**
+     * Where a scout finds candidates. `websearch` queries OpenAI's index with the verified hosts as
+     * a domain filter and opens what it returns; `storefront` drives each shop's own search box,
+     * which is slower and goes quiet when a shop throttles the AgentCore egress IP.
+     */
+    SCOUT_BRAIN: z.enum(["websearch", "storefront"]).default("websearch"),
+    /** Product pages a web-search scout opens in the browser per item. Each one is a page load. */
+    SCOUT_MAX_PRODUCT_OPENS: z.coerce.number().int().min(1).max(8).default(4),
     OPENAI_API_KEY: optionalString,
     OPENAI_MODEL: z.string().min(1).default("gpt-5.6-luna"),
     OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
@@ -62,12 +99,7 @@ const Env = z
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production") {
-      for (const field of [
-        "PLANNER_MODE",
-        "SCOUT_MODE",
-        "CARD_MODE",
-        "PURCHASE_AGENT_MODE",
-      ] as const) {
+      for (const field of ["PLANNER_MODE", "CARD_MODE", "PURCHASE_AGENT_MODE"] as const) {
         if (env[field] === "local") {
           ctx.addIssue({
             code: "custom",

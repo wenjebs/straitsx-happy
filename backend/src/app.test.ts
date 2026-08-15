@@ -19,17 +19,26 @@ import { DisabledAuthService } from "./services/auth.js";
 import { PurchaseService } from "./services/purchases.js";
 import { WalletAuthService } from "./services/walletAuth.js";
 import { WalletFundingService } from "./services/walletFunding.js";
+import { FrameHub } from "./streams.js";
 
 const config: Config = {
   PORT: 8787,
   NODE_ENV: "test",
   DATA_STORE: "memory",
   AWS_REGION: "ap-southeast-1",
-  FRONTEND_ORIGIN: "http://localhost:4040",
+  FRONTEND_ORIGIN: ["http://localhost:4040"],
   PUBLIC_BASE_URL: "http://localhost:8787",
   AUTH_MODE: "disabled",
   PLANNER_MODE: "remote",
   SCOUT_MODE: "remote",
+  AGENTCORE_BROWSER_ID: "aws.browser.v1",
+  AGENTCORE_SESSION_TIMEOUT_SECONDS: 900,
+  AGENTCORE_MAX_SESSIONS: 4,
+  AGENTCORE_JPEG_QUALITY: 60,
+  SCOUT_SLOTS_PER_ITEM: 2,
+  SCOUT_MAX_TOOL_CALLS: 10,
+  SCOUT_BRAIN: "websearch",
+  SCOUT_MAX_PRODUCT_OPENS: 4,
   OPENAI_MODEL: "gpt-5.6-luna",
   OPENAI_BASE_URL: "https://api.openai.com/v1",
   AGENT_CALLBACK_TOKEN: "callback-secret",
@@ -171,6 +180,8 @@ function harness(auth: AuthService = new TestAuth()) {
       funding,
       walletAuth,
       auth,
+      frames: new FrameHub(),
+      streamSecret: "test-stream-secret",
     }),
   };
 }

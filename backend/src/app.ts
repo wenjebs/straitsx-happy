@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
-import { streamSSE } from "hono/streaming";
+import { stream, streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
 import type { Config } from "./config.js";
@@ -12,6 +12,8 @@ import type { PlannerProvider, ScoutProvider } from "./providers/agent.js";
 import type { CardProvider } from "./providers/card.js";
 import type { PurchaseAgentProvider } from "./providers/purchaseAgent.js";
 import type { Repository } from "./repository.js";
+import type { FrameHub } from "./streams.js";
+import { verifyStreamToken } from "./streamTokens.js";
 import {
   AddWishlistItemBody,
   AgentCallbackEvent,
@@ -48,9 +50,15 @@ export interface AppDependencies {
   funding: WalletFundingService;
   walletAuth: WalletAuthService;
   auth: AuthService;
+  /** Live JPEG frames from the scouts' AgentCore browsers. */
+  frames: FrameHub;
+  /** Verifies the signed livestream URLs the scouts mint. */
+  streamSecret: string;
 }
 
 type AppBindings = { Variables: { user: AuthUser } };
+
+const MJPEG_BOUNDARY = "happyframe";
 
 export function createApp(deps: AppDependencies): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
@@ -89,7 +97,11 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
       ],
       warnings: [
         ...(deps.planner.mode === "local" ? ["LOCAL_PLANNER_FAILSAFE"] : []),
-        ...(deps.scouts.mode === "local" ? ["LOCAL_SCOUT_FAILSAFE"] : []),
+        // The scouts drive real browsers either way; without a key they follow a fixed tool order
+        // instead of the model choosing where to look.
+        ...(deps.scouts.mode === "agentcore" && !deps.config.OPENAI_API_KEY
+          ? ["SCOUT_BRAIN_SCRIPTED_NO_LLM"]
+          : []),
         ...(deps.cards.mode === "local" ? ["LOCAL_CARD_FAILSAFE_NO_REAL_MONEY"] : []),
         ...(deps.purchaseAgents.mode === "local" ? ["LOCAL_CLOSER_FAILSAFE"] : []),
       ],
@@ -115,7 +127,13 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
   });
 
   app.use("/v1/*", async (c, next) => {
-    if (c.req.path.startsWith("/v1/integrations/") || c.req.path.startsWith("/v1/dev/")) {
+    if (
+      c.req.path.startsWith("/v1/integrations/") ||
+      c.req.path.startsWith("/v1/dev/") ||
+      // The scout livestream is loaded by an <img>, which cannot carry an Authorization header, so
+      // it authenticates on its own with a signed, expiring token in the URL — see the route.
+      c.req.path.startsWith("/v1/streams/")
+    ) {
       await next();
       return;
     }
@@ -260,8 +278,82 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     return c.json(card, 201);
   });
 
+  /*
+   * A scout's live browser, as MJPEG.
+   *
+   * `multipart/x-mixed-replace` is what a webcam serves: the browser renders each part as it
+   * arrives and replaces the previous one, natively, in an <img> or an iframe. That is why the
+   * search screen's tile needs no player and no client library.
+   *
+   * Only the newest frame is ever in flight. A slow viewer skips frames rather than falling behind
+   * and watching a delayed replay of a browser that has already moved on.
+   */
+  app.get("/v1/streams/agents/:id", (c) => {
+    const agentId = c.req.param("id");
+    /*
+     * The URL is the credential. Agent ids are `scout-<itemId>-<slot>` and item ids are slugged
+     * product names, so without this anyone could guess another user's stream and watch their
+     * browser. The token is signed over the agent id and expires with the browser session.
+     */
+    if (!verifyStreamToken(deps.streamSecret, agentId, c.req.query("t"))) {
+      throw new HttpError(403, "Stream link is missing, expired or invalid.");
+    }
+    c.header("Content-Type", `multipart/x-mixed-replace; boundary=${MJPEG_BOUNDARY}`);
+    c.header("Cache-Control", "no-cache, no-store, no-transform");
+    c.header("X-Accel-Buffering", "no");
+    c.header("Pragma", "no-cache");
+
+    return stream(c, async (s) => {
+      let pending: Buffer | null = null;
+      let wake: (() => void) | null = null;
+      let aborted = false;
+
+      const unsubscribe = deps.frames.subscribe(agentId, (frame) => {
+        pending = frame;
+        wake?.();
+      });
+      s.onAbort(() => {
+        aborted = true;
+        unsubscribe();
+        wake?.();
+      });
+
+      try {
+        while (!aborted) {
+          if (!pending) {
+            if (deps.frames.isClosed(agentId)) break;
+            await new Promise<void>((resolve) => {
+              wake = () => {
+                wake = null;
+                resolve();
+              };
+              // Re-check periodically so a channel that closes with no further frames still ends
+              // the response instead of holding the connection open.
+              setTimeout(() => wake?.(), 1_000);
+            });
+            continue;
+          }
+          const frame: Buffer = pending;
+          pending = null;
+          await s.write(
+            `--${MJPEG_BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`,
+          );
+          await s.write(frame);
+          await s.write("\r\n");
+        }
+      } finally {
+        unsubscribe();
+      }
+    });
+  });
+
+  /*
+   * The Closer's local failsafe stream. The search phase no longer has one — its tiles show the
+   * real AgentCore browser — but the purchase phase still runs a simulated agent when
+   * PURCHASE_AGENT_MODE=local, and its execution rows need something to render.
+   */
   app.get("/v1/dev/streams/:id", (c) => {
-    if (deps.scouts.mode !== "local" && deps.purchaseAgents.mode !== "local") {
+    if (deps.purchaseAgents.mode !== "local") {
       throw new HttpError(404, "Local stream failsafe is disabled.");
     }
     const label = escapeHtml(c.req.query("label") ?? "agent browser");

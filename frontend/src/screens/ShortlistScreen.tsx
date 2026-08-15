@@ -1,5 +1,6 @@
 import type { Activity } from "../lib/Api";
 import { formatMinor, hue } from "../state/derive";
+import { AgentTiles } from "./SearchScreen";
 import styles from "./ShortlistScreen.module.css";
 
 interface ShortlistScreenProps {
@@ -21,6 +22,7 @@ export function ShortlistScreen({
 }: ShortlistScreenProps) {
   const total = activity.shortlist.reduce((sum, p) => sum + p.listing.amountMinor, 0);
   const headroom = Math.max(0, actCap * 100 - total);
+  const sellers = new Set(activity.shortlist.map((pick) => pick.listing.seller)).size;
 
   return (
     <div className={styles.screen}>
@@ -28,8 +30,9 @@ export function ShortlistScreen({
         <div className="eyebrow">Shortlist</div>
         <h2 className={styles.title}>One pick per item, ready for checkout</h2>
         <p className={styles.lede}>
-          Agents compared 214 listings across 9 sellers. Reject any pick to send its agents back
-          out.
+          {activity.agents.length} scouts browsed verified storefronts live and settled on {sellers}{" "}
+          {sellers === 1 ? "seller" : "sellers"}. Reject any pick to swap in the runner-up they
+          already opened and priced.
         </p>
 
         <div className={styles.list}>
@@ -98,6 +101,12 @@ export function ShortlistScreen({
               {submitting ? "Placing orders…" : "Confirm & purchase"}
             </button>
           </div>
+        </div>
+
+        {/* The scouts' browsers, frozen on the page each one finished. */}
+        <div className={styles.browsers}>
+          <div className="eyebrow">Scout browsers</div>
+          <AgentTiles activity={activity} />
         </div>
       </div>
     </div>

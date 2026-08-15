@@ -13,12 +13,26 @@ export function defaultWallet(): Wallet {
 /** A newly authenticated funding account starts empty; only verified deposits can credit it. */
 export function defaultFundingWallet(): Wallet {
   return {
-    balanceMinor: 0,
+    balanceMinor: devOpeningBalanceMinor(),
     address: "Not configured",
     network: "Not configured",
     cards: [],
     transactions: [],
   };
+}
+
+/**
+ * Testing top-up, in cents, opt-in through the environment.
+ *
+ * Nothing credits a real funding account except a confirmed on-chain deposit, which makes trying
+ * the search and checkout flow a chore: sign up, send XSGD, wait for a confirmation, then test. Set
+ * DEV_WALLET_BALANCE_MINOR to open new accounts with a balance instead. Unset — including every
+ * deployed environment that has not deliberately set it — this is 0 and the deposit path is the
+ * only way money gets in.
+ */
+function devOpeningBalanceMinor(): number {
+  const raw = Number.parseInt(process.env.DEV_WALLET_BALANCE_MINOR ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
 export function defaultMandate(): Mandate {

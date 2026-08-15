@@ -253,12 +253,15 @@
   text-overflow: ellipsis;
 }
 
+/* MJPEG frames from the scout's AgentCore browser. Contain, so a 900x620 capture
+   is letterboxed into the tile rather than cropped to its centre. */
 .liveFrame {
   display: block;
   width: 100%;
   height: calc(100% - 27px);
   border: 0;
   background: #f5f5f6;
+  object-fit: contain;
 }
 
 .streamWaiting {
@@ -303,4 +306,128 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Scout log — the running narration the tiles overwrite. */
+.feedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  animation: h-blink 1.1s ease-in-out infinite;
+  flex: none;
+}
+
+.feed {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  margin-bottom: 22px;
+  overflow: hidden;
+}
+
+.feedHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.feedTitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.feedCount {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-quaternary);
+}
+
+.feedScroll {
+  max-height: 172px;
+  overflow-y: auto;
+  padding: 8px 14px 10px;
+  scroll-behavior: smooth;
+}
+
+.feedEmpty {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-quaternary);
+  padding: 6px 0;
+}
+
+.feedLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.feedAt {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-quaternary);
+  flex: none;
+  width: 58px;
+}
+
+.feedChip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.feedShort {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-tertiary);
+  flex: none;
+  width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feedStage {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-disabled);
+  flex: none;
+  width: 74px;
+}
+
+/* The action is the sentence worth reading, so it takes the slack and the URL yields. */
+.feedAction {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feedUrl {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-quaternary);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+.tilesEmpty {
+  border: 1px dashed var(--border);
+  border-radius: var(--r-card);
+  padding: 22px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
 }

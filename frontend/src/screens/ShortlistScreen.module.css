@@ -171,3 +171,10 @@
 .confirm:hover {
   background: var(--hover-primary);
 }
+
+/* The scout browsers, carried over from the search screen on their final frame. */
+.browsers {
+  margin-top: 22px;
+  display: grid;
+  gap: 10px;
+}

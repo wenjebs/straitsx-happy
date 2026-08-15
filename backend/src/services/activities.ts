@@ -355,6 +355,18 @@ export class ActivityService {
         this.events.emit(id, { type: "agent.update", agent: event.agent });
         break;
       }
+      /*
+       * The search narration. A scout's off-browser work — the web search that finds what the
+       * browsers then go and price — has no tile to move, so it reports here instead. Kept bounded:
+       * this is a live feed, not an audit trail, and the checkpoint carries every line it holds.
+       */
+      case "log.line": {
+        if (activity.log.some((line) => line.id === event.line.id)) return activity;
+        activity.log = [...activity.log, event.line].slice(-200);
+        await this.repository.putActivity(activity, "search.log_line");
+        this.events.emit(id, { type: "log.line", line: event.line });
+        break;
+      }
       case "shortlist.ready": {
         const expected = new Set(activity.wishlist.map((item) => item.id));
         const received = new Set(event.shortlist.map((pick) => pick.itemId));

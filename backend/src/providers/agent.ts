@@ -1,6 +1,5 @@
 import type { Activity } from "../domain.js";
 import { HttpError } from "../errors.js";
-import { matchListing } from "./matchListing.js";
 
 export interface PlannerProvider {
   readonly mode: "local" | "remote" | "openai" | "disabled";
@@ -9,7 +8,7 @@ export interface PlannerProvider {
 }
 
 export interface ScoutProvider {
-  readonly mode: "local" | "remote" | "disabled";
+  readonly mode: "agentcore" | "remote" | "disabled";
   dispatchSearch(activity: Activity): Promise<void>;
   setSearchPaused(activity: Activity, paused: boolean): Promise<void>;
   rejectListing(activity: Activity, itemId: string): Promise<void>;
@@ -17,50 +16,63 @@ export interface ScoutProvider {
 }
 
 export interface AgentProvider extends PlannerProvider, ScoutProvider {
-  readonly mode: "local" | "remote" | "disabled";
+  readonly mode: "remote" | "disabled";
 }
 
-interface LocalAgentOptions {
+interface LocalPlannerOptions {
   callbackBaseUrl: string;
   callbackToken?: string;
 }
 
-/** Local Scout/curator that exercises the authenticated callback and SSE path. */
-export class LocalAgentProvider implements AgentProvider {
+/**
+ * Local planner failsafe. It exercises the authenticated callback and the SSE path without an
+ * OpenAI key, so the chat and wishlist screens work offline.
+ *
+ * It used to answer every request with the same two hardcoded items, which meant asking for
+ * skincare and watching the scouts go looking for coffee. A stub that ignores the request is worse
+ * than no stub: it looks like the search is broken when it is the planner that never read the
+ * goal.
+ *
+ * So it splits what was actually typed. No model, no inference — it takes the request apart on
+ * commas and "and", which is honest about being a fallback and still sends the scouts after the
+ * thing that was asked for. Set PLANNER_MODE=openai for a planner that decomposes a real request
+ * into a bill of materials.
+ *
+ * It deliberately has no search half. The search phase used to be simulated here — four timed
+ * stages and a hardcoded shortlist of products that did not exist — and that is now
+ * `AgentCoreScoutProvider`, which drives real browsers over real storefronts.
+ */
+export class LocalPlannerProvider implements PlannerProvider {
   readonly mode = "local" as const;
-  private readonly paused = new Set<string>();
   private readonly cancelled = new Set<string>();
 
-  constructor(private readonly options: LocalAgentOptions) {}
+  constructor(private readonly options: LocalPlannerOptions) {}
 
   async startPlanning(activity: Activity): Promise<void> {
     this.cancelled.delete(activity.id);
+    const goal =
+      activity.messages.find((message) => message.role === "user")?.text?.trim() ||
+      activity.title.trim();
+    const names = splitGoal(goal);
+
     void this.after(700, activity.id, {
       type: "wishlist.ready",
-      title: "Everyday desk essentials",
-      reply:
-        "I turned that into two low-value items so you can safely walk through the complete local agent and purchase flow.",
-      wishlistEstimate: "est. S$43.80",
-      wishlist: [
-        {
-          id: "usb-c-cable",
-          name: "Braided USB-C cable",
-          short: "CABLE",
-          spec: "USB-C to USB-C · 100W · 2m",
-          budget: "up to S$20",
-          hueIndex: 0,
-          category: "Electronics",
-        },
-        {
-          id: "phone-stand",
-          name: "Adjustable phone stand",
-          short: "STAND",
-          spec: "foldable · aluminium · desk use",
-          budget: "up to S$25",
-          hueIndex: 1,
-          category: "Electronics",
-        },
-      ],
+      title: goal.length > 60 ? `${goal.slice(0, 57)}…` : goal,
+      reply: `Working without a planner model, so I split your request literally into ${
+        names.length === 1 ? "one item" : `${names.length} items`
+      } and sent the scouts to the verified shops. Edit the list before dispatching if I read it wrong.`,
+      wishlistEstimate: `up to S$${((names.length * 3000) / 100).toFixed(2)}`,
+      wishlist: names.map((name, index) => ({
+        id: `item-${index + 1}-${slug(name)}`,
+        name,
+        short: name.toUpperCase().slice(0, 16),
+        // No model means no specification worth inventing. Saying so beats fabricating
+        // "single origin · 250g · whole bean" for something the shopper never described.
+        spec: "as described",
+        // The card cannot mint above S$30, so nothing larger is worth searching for.
+        budget: "up to S$30",
+        hueIndex: index % 6,
+      })),
       clarifications: [],
     });
   }
@@ -69,111 +81,10 @@ export class LocalAgentProvider implements AgentProvider {
     this.cancelled.add(activity.id);
   }
 
-  async dispatchSearch(activity: Activity): Promise<void> {
-    this.cancelled.delete(activity.id);
-    void this.runSearch(activity);
-  }
-
-  async cancelSearch(activity: Activity): Promise<void> {
-    this.cancelled.add(activity.id);
-    this.paused.delete(activity.id);
-  }
-
-  async setSearchPaused(activity: Activity, paused: boolean): Promise<void> {
-    if (paused) this.paused.add(activity.id);
-    else this.paused.delete(activity.id);
-  }
-
-  async rejectListing(activity: Activity, itemId: string): Promise<void> {
-    const next = activity.shortlist.map((pick) => {
-      if (pick.itemId !== itemId || !pick.alternates?.[0]) return pick;
-      return {
-        ...pick,
-        listing: pick.alternates[0],
-        alternates: [pick.listing, ...pick.alternates.slice(1)],
-        reSearched: true,
-      };
-    });
-    void this.after(800, activity.id, { type: "shortlist.ready", shortlist: next });
-  }
-
-  private async runSearch(activity: Activity): Promise<void> {
-    for (const item of activity.wishlist) {
-      for (const slot of [0, 1] as const) {
-        if (this.cancelled.has(activity.id)) return;
-        await this.post(activity.id, {
-          type: "agent.update",
-          agent: {
-            agentId: `local-scout-${item.id}-${slot}`,
-            itemId: item.id,
-            slot,
-            url: slot === 0 ? "local.market/search" : "local.specialist/search",
-            stage: 0,
-            action: "launching local browser",
-            queued: false,
-            liveStreamUrl: this.streamUrl(`scout-${item.id}-${slot}`, "scout", item.name),
-          },
-        });
-      }
-    }
-
-    for (const stage of [1, 2, 3, 4] as const) {
-      await this.waitIfPaused(activity.id);
-      if (this.cancelled.has(activity.id)) return;
-      await delay(520);
-      for (const item of activity.wishlist) {
-        if (this.cancelled.has(activity.id)) return;
-        await this.post(activity.id, {
-          type: "item.progress",
-          progress: {
-            itemId: item.id,
-            stage,
-            previousStage: stage === 1 ? 0 : stage - 1,
-            queued: false,
-          },
-        });
-        for (const slot of [0, 1] as const) {
-          const actions = [
-            "",
-            "opening listings",
-            "checking seller and price",
-            "comparing candidates",
-            "shortlisting best fit",
-          ];
-          await this.post(activity.id, {
-            type: "agent.update",
-            agent: {
-              agentId: `local-scout-${item.id}-${slot}`,
-              itemId: item.id,
-              slot,
-              url: slot === 0 ? "local.market/listing" : "local.specialist/listing",
-              stage,
-              action: actions[stage],
-              queued: false,
-              liveStreamUrl: this.streamUrl(`scout-${item.id}-${slot}`, "scout", item.name),
-            },
-          });
-        }
-      }
-    }
-    await delay(450);
-    if (this.cancelled.has(activity.id)) return;
-    await this.post(activity.id, { type: "shortlist.ready", shortlist: localShortlist(activity) });
-  }
-
   private async after(ms: number, activityId: string, body: unknown): Promise<void> {
     await delay(ms);
     if (this.cancelled.has(activityId)) return;
     await this.post(activityId, body);
-  }
-
-  private async waitIfPaused(activityId: string): Promise<void> {
-    while (this.paused.has(activityId)) await delay(250);
-  }
-
-  private streamUrl(id: string, kind: string, label: string): string {
-    const base = this.options.callbackBaseUrl.replace(/\/$/, "");
-    return `${base}/v1/dev/streams/${encodeURIComponent(id)}?kind=${encodeURIComponent(kind)}&label=${encodeURIComponent(label)}`;
   }
 
   private async post(activityId: string, body: unknown): Promise<void> {
@@ -321,65 +232,46 @@ export class DisabledAgentProvider implements AgentProvider {
 }
 
 /**
- * Discovery, standing in for a live search.
+ * A typed request, cut into wishlist items.
  *
- * Each wishlist item is matched against a catalogue of REAL products on Singapore storefronts —
- * every URL opened by a browser, every price read off its own product page, every shop confirmed
- * to serve an AWS datacentre IP and to reach a card form at checkout.pci.shopifyinc.com.
- *
- * It replaces a stub that handed every item the same three hardcoded listings, which offered an
- * energy drink for "Cocomo Gentle Facial Cleanser". A shortlist that looks plausible and is wrong
- * is worse than no discovery at all.
- *
- * Set SCOUT_LISTINGS=demo-store to point discovery at our own storefront instead, which is the
- * only target that completes a purchase entirely offline.
+ * Splits on the separators people actually use for lists — commas, "and", newlines, bullets — and
+ * strips the verbs a request opens with ("buy me a…", "find…") so the item reads as a thing rather
+ * than an instruction. Anything it cannot split stays one item, which is the right answer for
+ * "skincare".
  */
-function localShortlist(activity: Activity) {
-  if (process.env.SCOUT_LISTINGS === "demo-store") return demoStoreShortlist(activity);
+function splitGoal(goal: string): string[] {
+  const parts = goal
+    .split(/\n+|,|;|\band\b|\bplus\b|&/i)
+    .map((part) =>
+      part
+        .replace(/^[\s\-*•\d.)]+/, "")
+        .replace(/^(?:can you\s+|please\s+|i(?:'d| would) like\s+|i want\s+|i need\s+)/i, "")
+        .replace(/^(?:buy|get|find|order|purchase|search for|look for|source)\s+/i, "")
+        .replace(/^(?:me\s+)?(?:a|an|some|the)\s+/i, "")
+        .trim(),
+    )
+    .filter((part) => part.length > 1);
 
-  // Shared across the wishlist so two items never get proposed the same product.
-  const used = new Set<string>();
-
-  return activity.wishlist.map((item) => {
-    const text = [item.name, item.spec, item.category].filter(Boolean).join(" ");
-    const { listing, alternates } = matchListing(text, used);
-    return { itemId: item.id, reSearched: false, listing, alternates };
-  });
+  const unique: string[] = [];
+  for (const part of parts) {
+    if (!unique.some((existing) => existing.toLowerCase() === part.toLowerCase())) {
+      unique.push(part);
+    }
+  }
+  // Fall back to the raw goal rather than an empty wishlist, which the UI cannot dispatch.
+  if (unique.length === 0) return [goal.slice(0, 80) || "something nice"];
+  return unique.slice(0, 6);
 }
 
-/**
- * apps/demo-store, for a run that completes with no network and no money.
- *
- * Prices mirror its own catalogue deliberately. If they drift the Closer's total check refuses the
- * purchase, which is the check working rather than a bug.
- */
-function demoStoreShortlist(activity: Activity) {
-  const base = (process.env.DEMO_STORE_URL ?? "http://127.0.0.1:4030").replace(/\/$/, "");
-  const pool = [
-    {
-      title: "Anker USB-C Hub",
-      seller: "demo-store",
-      rating: "verified listing",
-      price: "S$18.00",
-      amountMinor: 1800,
-      why: "Matches the specification within budget.",
-      url: `${base}/item/usb-c-hub`,
-    },
-    {
-      title: "1TB NVMe SSD",
-      seller: "demo-store",
-      rating: "verified listing",
-      price: "S$29.00",
-      amountMinor: 2900,
-      why: "Highest capacity still inside the card's S$30 ceiling.",
-      url: `${base}/item/nvme-ssd`,
-    },
-  ];
-  return activity.wishlist.map((item, i) => {
-    const listing = pool[i % pool.length];
-    if (!listing) throw new Error("demo-store pool is empty");
-    return { itemId: item.id, reSearched: false, listing, alternates: [] };
-  });
+function slug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "item"
+  );
 }
 
 function delay(ms: number): Promise<void> {

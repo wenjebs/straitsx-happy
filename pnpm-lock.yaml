@@ -109,10 +109,19 @@ importers:
 
   backend:
     dependencies:
+      '@aws-crypto/sha256-js':
+        specifier: ^5.2.0
+        version: 5.2.0
+      '@aws-sdk/client-bedrock-agentcore':
+        specifier: ^3.1106.0
+        version: 3.1106.0
       '@aws-sdk/client-cognito-identity-provider':
         specifier: ^3.1106.0
         version: 3.1106.0
       '@aws-sdk/client-dynamodb':
+        specifier: ^3
+        version: 3.1106.0
+      '@aws-sdk/credential-providers':
         specifier: ^3
         version: 3.1106.0
       '@aws-sdk/lib-dynamodb':
@@ -121,12 +130,21 @@ importers:
       '@hono/node-server':
         specifier: ^2
         version: 2.1.0(hono@4.13.1)
+      '@smithy/protocol-http':
+        specifier: ^5
+        version: 5.5.16
+      '@smithy/signature-v4':
+        specifier: ^5
+        version: 5.6.12
       aws-jwt-verify:
         specifier: ^5.2.1
         version: 5.2.1
       hono:
         specifier: ^4
         version: 4.13.1
+      playwright:
+        specifier: ^1.62.1
+        version: 1.62.1
       viem:
         specifier: 2.55.11
         version: 2.55.11(typescript@5.9.3)(zod@4.4.3)
