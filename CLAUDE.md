@@ -125,6 +125,10 @@ Weekend hackathon, not a maintained library. Only money-path defects justify a f
 double payment, lost payments, spending past the mandate, leaked card material. Coverage gaps,
 test ergonomics and style get logged and skipped.
 
+**Everyone commits straight to `main` with plain `git commit`.** No branches, no Graphite, no
+stacked PRs — several people work in this repo at once and the ceremony costs more than it
+returns over a weekend. Stage only what you touched, commit often, pull before you push.
+
 Do not run a blanket `git checkout -- .` while other agents are working; it discards their
 uncommitted work. Revert named files instead.
 
