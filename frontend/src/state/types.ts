@@ -1,9 +1,17 @@
-import type { Activity, ConnectionState, Mandate, Profile, Settings, Wallet } from "../lib/Api";
+import type {
+  Activity,
+  ActivityCheckpoint,
+  ConnectionState,
+  Mandate,
+  Profile,
+  Settings,
+  Wallet,
+} from "../lib/Api";
 
 export type Screen = "purchase" | "wallet" | "mandate" | "settings" | "profile";
 
-/** null = feed visible; "current" = the running activity; otherwise an archive id. */
-export type Focused = null | "current" | string;
+/** null = new-chat/activity-list page; otherwise the displayed activity id. */
+export type Focused = string | null;
 
 /**
  * Everything the shell renders. Server-backed fields mirror what Api.ts
@@ -18,12 +26,12 @@ export interface HappyState {
   draft: string;
   newItem: string;
   editing: boolean;
-  /**
-   * True after Back, or before anything has been sent: the main column shows
-   * the empty chat even though an activity may still be running in the
-   * background. Purely a view concern — the activity itself is untouched.
-   */
-  detached: boolean;
+  /** Confirmation before discarding curator choices and returning to wishlist editing. */
+  confirmingWishlistRevert: boolean;
+  wishlistReverting: boolean;
+  /** Confirmation for stopping any live activity. */
+  confirmingActivityCancel: boolean;
+  activityCancelling: boolean;
   /** Guards the irreversible purchase call behind an explicit confirmation. */
   confirmingPurchase: boolean;
   /** Set while a spend call is in flight, so it cannot be submitted twice. */
@@ -32,9 +40,13 @@ export interface HappyState {
   elapsed: number;
 
   // -- server-backed
+  /** All live and historical activities, newest first. */
+  activities: Activity[];
+  /** The selected live activity. Other live activities continue in activities. */
   running: Activity | null;
-  archived: Activity[];
   viewingArchive: Activity | null;
+  activityHistory: ActivityCheckpoint[] | null;
+  historyLoading: boolean;
   wallet: Wallet | null;
   mandate: Mandate | null;
   settings: Settings | null;

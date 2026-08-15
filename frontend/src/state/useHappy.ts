@@ -10,13 +10,18 @@ const initialState: HappyState = {
   draft: "",
   newItem: "",
   editing: false,
-  detached: true,
+  confirmingWishlistRevert: false,
+  wishlistReverting: false,
+  confirmingActivityCancel: false,
+  activityCancelling: false,
   confirmingPurchase: false,
   purchaseSubmitting: false,
   elapsed: 0,
+  activities: [],
   running: null,
-  archived: [],
   viewingArchive: null,
+  activityHistory: null,
+  historyLoading: false,
   wallet: null,
   mandate: null,
   settings: null,
@@ -26,7 +31,16 @@ const initialState: HappyState = {
   loading: true,
 };
 
-type Action = { type: "set"; patch: Partial<HappyState> } | { type: "event"; event: ActivityEvent };
+type Action =
+  | { type: "set"; patch: Partial<HappyState> }
+  | { type: "event"; activityId: string; event: ActivityEvent };
+
+function upsertActivity(activities: Activity[], activity: Activity): Activity[] {
+  const next = activities.some((row) => row.id === activity.id)
+    ? activities.map((row) => (row.id === activity.id ? activity : row))
+    : [activity, ...activities];
+  return next.toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
 
 /**
  * Applies one server event. Each case touches only what moved, so a stage
@@ -96,7 +110,22 @@ function reducer(state: HappyState, action: Action): HappyState {
   if (action.event.type === "wallet.updated") {
     return { ...state, wallet: action.event.wallet };
   }
-  return { ...state, running: applyEvent(state.running, action.event) };
+  const current = state.activities.find((activity) => activity.id === action.activityId) ?? null;
+  const activity = applyEvent(current, action.event);
+  if (!activity) return state;
+  const selected = state.focused === action.activityId;
+  const archived = activity.status !== "live";
+  return {
+    ...state,
+    activities: upsertActivity(state.activities, activity),
+    running: state.running?.id === action.activityId ? (archived ? null : activity) : state.running,
+    viewingArchive:
+      selected && archived
+        ? activity
+        : state.viewingArchive?.id === action.activityId
+          ? activity
+          : state.viewingArchive,
+  };
 }
 
 export interface HappyActions {
@@ -104,6 +133,12 @@ export interface HappyActions {
   setDraft: (value: string) => void;
   setNewItem: (value: string) => void;
   toggleEditing: () => void;
+  requestWishlistEdit: () => void;
+  cancelWishlistEdit: () => void;
+  confirmWishlistEdit: () => Promise<void>;
+  requestActivityCancel: () => void;
+  dismissActivityCancel: () => void;
+  confirmActivityCancel: () => Promise<void>;
   addItem: () => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   approveWishlist: () => Promise<void>;
@@ -121,8 +156,9 @@ export interface HappyActions {
   setSetting: (key: "notify" | "sandbox") => Promise<void>;
   goScreen: (screen: Screen) => void;
   back: () => void;
-  openCurrent: () => void;
-  openArchive: (id: string) => Promise<void>;
+  openActivity: (id: string) => Promise<void>;
+  viewActivityHistory: () => Promise<void>;
+  closeActivityHistory: () => void;
   newActivity: () => void;
   jumpToStage: (stage: ActivityStage) => Promise<void>;
   toggleSidebar: () => void;
@@ -162,9 +198,9 @@ export function useHappy(): Happy {
         if (cancelled) return;
         const running = activities.find((a) => a.status === "live") ?? null;
         set({
-          archived: activities.filter((a) => a.status !== "live"),
+          activities,
           running,
-          detached: !running,
+          focused: running?.id ?? null,
           wallet,
           mandate,
           settings,
@@ -184,22 +220,27 @@ export function useHappy(): Happy {
     };
   }, [set, fail]);
 
-  /*
-   * One subscription for the running activity. The stream is the source of
-   * truth for anything that moves, so this stays open while the activity lives
-   * — including while the user is on another screen, which is what lets the
-   * feed card keep advancing.
-   */
-  const runningId = state.running?.id ?? null;
+  /* Keep every live activity fresh while the user starts or views another one. */
+  const liveActivityIds = state.activities
+    .filter((activity) => activity.status === "live")
+    .map((activity) => activity.id)
+    .join("\u0000");
   useEffect(() => {
-    if (!runningId) return;
-    const sub = Api.subscribeToActivity(
-      runningId,
-      (event) => dispatch({ type: "event", event }),
-      (connection: ConnectionState) => set({ connection }),
+    const ids = liveActivityIds ? liveActivityIds.split("\u0000") : [];
+    const subscriptions = ids.map((activityId) =>
+      Api.subscribeToActivity(
+        activityId,
+        (event) => dispatch({ type: "event", activityId, event }),
+        stateRef.current.running?.id === activityId
+          ? (connection: ConnectionState) => set({ connection })
+          : undefined,
+      ),
     );
-    return () => sub.close();
-  }, [runningId, set]);
+    return () =>
+      subscriptions.forEach((subscription) => {
+        subscription.close();
+      });
+  }, [liveActivityIds, set]);
 
   /* Elapsed counter for "t+42s". Ticks off the clock, not off agent events. */
   const startedAt = state.running?.searchStartedAt;
@@ -214,8 +255,44 @@ export function useHappy(): Happy {
   }, [startedAt, searching, set]);
 
   const actions = useMemo<HappyActions>(() => {
-    /** Replaces the running activity with whatever a mutation returned. */
-    const applied = (activity: Activity) => set({ running: activity, error: null });
+    /** Updates the selected activity while retaining every other live activity. */
+    const applied = (activity: Activity) => {
+      const archived = activity.status !== "live";
+      set({
+        activities: upsertActivity(stateRef.current.activities, activity),
+        running: archived ? null : activity,
+        viewingArchive: archived ? activity : null,
+        activityHistory: null,
+        focused: activity.id,
+        error: null,
+      });
+    };
+
+    const showNewActivity = () => {
+      set({
+        screen: "purchase",
+        focused: null,
+        viewingArchive: null,
+        activityHistory: null,
+        historyLoading: false,
+        draft: "",
+        editing: false,
+        confirmingWishlistRevert: false,
+        wishlistReverting: false,
+        confirmingActivityCancel: false,
+        activityCancelling: false,
+      });
+      void Api.listActivities()
+        .then((activities) =>
+          set({
+            activities: activities.reduce(
+              (current, activity) => upsertActivity(current, activity),
+              stateRef.current.activities,
+            ),
+          }),
+        )
+        .catch(fail);
+    };
 
     const guard = async (fn: () => Promise<void>) => {
       try {
@@ -229,13 +306,53 @@ export function useHappy(): Happy {
       setDraft: (value) => set({ draft: value }),
       setNewItem: (value) => set({ newItem: value }),
       toggleEditing: () => set({ editing: !stateRef.current.editing }),
+      requestWishlistEdit: () => {
+        if (stateRef.current.running?.stage === "curate") {
+          set({ confirmingWishlistRevert: true });
+        }
+      },
+      cancelWishlistEdit: () => set({ confirmingWishlistRevert: false }),
+      confirmWishlistEdit: async () => {
+        const { running, wishlistReverting } = stateRef.current;
+        if (!running || wishlistReverting) return;
+        set({ wishlistReverting: true });
+        try {
+          applied(await Api.reopenWishlist(running.id));
+          set({
+            editing: true,
+            confirmingWishlistRevert: false,
+            wishlistReverting: false,
+          });
+        } catch (error) {
+          set({ wishlistReverting: false });
+          fail(error);
+        }
+      },
+      requestActivityCancel: () => {
+        if (stateRef.current.running?.status === "live") {
+          set({ confirmingActivityCancel: true });
+        }
+      },
+      dismissActivityCancel: () => set({ confirmingActivityCancel: false }),
+      confirmActivityCancel: async () => {
+        const { running, activityCancelling } = stateRef.current;
+        if (!running || activityCancelling) return;
+        set({ activityCancelling: true });
+        try {
+          applied(await Api.cancelActivity(running.id));
+          set({ confirmingActivityCancel: false, activityCancelling: false });
+        } catch (error) {
+          set({ activityCancelling: false });
+          fail(error);
+        }
+      },
       toggleSidebar: () => set({ sidebarOpen: !stateRef.current.sidebarOpen }),
       dismissError: () => set({ error: null }),
 
       send: () =>
         guard(async () => {
           const goal = stateRef.current.draft.trim() || "build me a budget gaming PC under S$1,600";
-          set({ draft: "", detached: false });
+          set({ draft: "" });
           applied(await Api.createActivity(goal));
         }),
 
@@ -257,7 +374,10 @@ export function useHappy(): Happy {
       approveWishlist: () =>
         guard(async () => {
           const { running } = stateRef.current;
-          if (running) applied(await Api.approveWishlist(running.id));
+          if (running) {
+            applied(await Api.approveWishlist(running.id));
+            set({ editing: false });
+          }
         }),
 
       choose: (itemId, option) =>
@@ -320,27 +440,41 @@ export function useHappy(): Happy {
 
       goScreen: (screen) => set({ screen }),
 
-      back: () => set({ screen: "purchase", focused: null, detached: true, viewingArchive: null }),
+      back: showNewActivity,
 
-      openCurrent: () =>
-        set({ screen: "purchase", focused: "current", detached: false, viewingArchive: null }),
-
-      openArchive: (id) =>
+      openActivity: (id) =>
         guard(async () => {
           const activity = await Api.getActivity(id);
-          set({ screen: "purchase", focused: id, viewingArchive: activity, detached: true });
+          set({
+            screen: "purchase",
+            focused: activity.id,
+            confirmingWishlistRevert: false,
+            wishlistReverting: false,
+            confirmingActivityCancel: false,
+            activityCancelling: false,
+            activityHistory: null,
+            historyLoading: false,
+            activities: upsertActivity(stateRef.current.activities, activity),
+            ...(activity.status === "live"
+              ? { running: activity, viewingArchive: null }
+              : { viewingArchive: activity }),
+          });
         }),
 
-      newActivity: () =>
-        set({
-          screen: "purchase",
-          focused: null,
-          detached: true,
-          viewingArchive: null,
-          running: null,
-          draft: "",
-          editing: false,
-        }),
+      viewActivityHistory: async () => {
+        const archive = stateRef.current.viewingArchive;
+        if (!archive || stateRef.current.historyLoading) return;
+        set({ historyLoading: true });
+        try {
+          set({ activityHistory: await Api.getActivityHistory(archive.id), historyLoading: false });
+        } catch (error) {
+          set({ historyLoading: false });
+          fail(error);
+        }
+      },
+      closeActivityHistory: () => set({ activityHistory: null }),
+
+      newActivity: showNewActivity,
 
       /*
        * Demo affordance from the stage bar. In live mode this asks the backend
@@ -349,8 +483,7 @@ export function useHappy(): Happy {
       jumpToStage: (stage) =>
         guard(async () => {
           const { running } = stateRef.current;
-          set({ focused: "current", detached: false });
-          if (!running) return;
+          if (!running || stateRef.current.focused !== running.id) return;
           if (stage === "search") applied(await Api.dispatchAgents(running.id));
           else if (stage === "shortlist" || stage === "exec") {
             /* Never auto-start a spend from a nav control. */
@@ -360,7 +493,10 @@ export function useHappy(): Happy {
     };
   }, [set, fail]);
 
-  const displayed = state.viewingArchive ?? (state.detached ? null : state.running);
+  const displayed =
+    state.focused === null
+      ? null
+      : (state.viewingArchive ?? (state.running?.id === state.focused ? state.running : null));
 
   return { state, actions, displayed };
 }

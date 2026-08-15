@@ -29,16 +29,29 @@ export function CuratorCard({ itemId, activity, actions }: CuratorCardProps) {
           const picked = clarification.chosen === option.name;
           return (
             <div key={option.name} className={`${styles.option} ${picked ? styles.chosen : ""}`}>
-              <div
-                className={styles.image}
-                style={
-                  option.imageUrl
-                    ? { backgroundImage: `url(${option.imageUrl})`, backgroundSize: "cover" }
-                    : undefined
-                }
-              >
-                {!option.imageUrl && <span className={styles.imageLabel}>{option.imgLabel}</span>}
+              <div className={styles.image}>
+                {option.imageUrl ? (
+                  <img
+                    className={styles.photo}
+                    src={option.imageUrl}
+                    alt={`${option.name} reference`}
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className={styles.imageLabel}>{option.imgLabel}</span>
+                )}
               </div>
+              {option.imageSourceUrl && (
+                <a
+                  className={styles.credit}
+                  href={option.imageSourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={option.imageAttribution ?? "View image source and licence"}
+                >
+                  {option.imageAttribution ?? "Image source · Wikimedia Commons"}
+                </a>
+              )}
               <div className={styles.body}>
                 <div className={styles.name}>{option.name}</div>
                 <div className={styles.range}>{option.range}</div>

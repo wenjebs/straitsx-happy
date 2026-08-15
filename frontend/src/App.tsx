@@ -1,12 +1,15 @@
 import styles from "./App.module.css";
+import { ActivityCancelConfirm } from "./components/ActivityCancelConfirm";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { Header } from "./components/Header";
 import { PurchaseConfirm } from "./components/PurchaseConfirm";
 import { Sidebar } from "./components/Sidebar";
 import { StageBar } from "./components/StageBar";
+import { WishlistRevertConfirm } from "./components/WishlistRevertConfirm";
 import type { ActivityStage } from "./lib/Api";
 import { isLive } from "./lib/Api";
+import { ActivityHistoryScreen } from "./screens/ActivityHistoryScreen";
 import { ArchiveScreen } from "./screens/ArchiveScreen";
 import { ChatScreen } from "./screens/ChatScreen";
 import { ExecutionScreen } from "./screens/ExecutionScreen";
@@ -54,7 +57,11 @@ export function App() {
   const title = onPurchase
     ? (archive?.title ?? flow?.title ?? "New activity")
     : SCREEN_TITLE[state.screen as keyof typeof SCREEN_TITLE];
-  const meta = onPurchase ? (archive?.displayTs ?? (flow ? HEADER_META[flow.stage] : "draft")) : "";
+  const meta = onPurchase
+    ? state.activityHistory
+      ? "activity history"
+      : (archive?.displayTs ?? (flow ? HEADER_META[flow.stage] : "draft"))
+    : "";
 
   const shortlistTotal = flow?.shortlist.reduce((sum, p) => sum + p.listing.amountMinor, 0) ?? 0;
 
@@ -73,7 +80,10 @@ export function App() {
           title={title}
           meta={meta}
           showBack={state.focused !== null && onPurchase}
+          showCancel={onPurchase && flow?.status === "live"}
+          cancelling={state.activityCancelling}
           onBack={actions.back}
+          onCancel={actions.requestActivityCancel}
           onProfile={() => actions.goScreen("profile")}
         />
 
@@ -93,7 +103,21 @@ export function App() {
 
         <div className={styles.body}>
           <section className={styles.content}>
-            {onPurchase && archive && <ArchiveScreen activity={archive} />}
+            {onPurchase && archive && state.activityHistory && (
+              <ActivityHistoryScreen
+                activity={archive}
+                checkpoints={state.activityHistory}
+                onClose={actions.closeActivityHistory}
+              />
+            )}
+
+            {onPurchase && archive && !state.activityHistory && (
+              <ArchiveScreen
+                activity={archive}
+                historyLoading={state.historyLoading}
+                onViewHistory={() => void actions.viewActivityHistory()}
+              />
+            )}
 
             {isChat && <ChatScreen state={state} actions={actions} activity={flow} />}
 
@@ -143,11 +167,8 @@ export function App() {
 
           {onPurchase && state.focused === null && (
             <ActivityFeed
-              running={state.running}
-              archived={state.archived}
-              currentOnScreen={!state.detached}
-              onOpenCurrent={actions.openCurrent}
-              onOpenArchive={(id) => void actions.openArchive(id)}
+              activities={state.activities}
+              onOpen={(id) => void actions.openActivity(id)}
               onNew={actions.newActivity}
             />
           )}
@@ -162,6 +183,23 @@ export function App() {
           submitting={state.purchaseSubmitting}
           onCancel={actions.cancelPurchase}
           onConfirm={() => void actions.confirmPurchase()}
+        />
+      )}
+
+      {state.confirmingWishlistRevert && flow && (
+        <WishlistRevertConfirm
+          submitting={state.wishlistReverting}
+          onCancel={actions.cancelWishlistEdit}
+          onConfirm={() => void actions.confirmWishlistEdit()}
+        />
+      )}
+
+      {state.confirmingActivityCancel && flow && (
+        <ActivityCancelConfirm
+          duringCheckout={flow.stage === "exec"}
+          submitting={state.activityCancelling}
+          onDismiss={actions.dismissActivityCancel}
+          onConfirm={() => void actions.confirmActivityCancel()}
         />
       )}
     </div>

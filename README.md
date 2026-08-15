@@ -10,8 +10,9 @@ card it holds. Enforcing the cap on-chain as well, via a smart account whose
 session key the network itself constrains, is deferred — see the spec's
 out-of-scope section.
 
-Built for the AgentiX Playground. Runs entirely offline against a mock issuer by
-default.
+Built for the AgentiX Playground. The concierge backend is integration-ready for
+Happy-owned OpenAI planning plus separate Scout, StraitsX card, and Closer services. Its default local
+failsafe is visibly labelled, requires Sandbox mode, and cannot spend real money.
 
 - Design: [`DESIGN.md`](./DESIGN.md)
 - Non-technical walkthrough: [`PLAIN.md`](./PLAIN.md)
@@ -30,24 +31,25 @@ That starts two processes:
 
 | | port | |
 |---|---|---|
-| `@happy/api` | 8787 | mandates, `decide()`, ledger, card issuance |
-| `@happy/demo-store` | 4030 | storefront the agent checks out against |
+| `@happy/backend` | 8787 | activities, DynamoDB repository, SSE, agent callbacks, mandate and checkout orchestration |
+| `@happy/frontend` | 4040 | React concierge UI |
 
 Check it came up:
 
 ```bash
 curl localhost:8787/v1/health
-# {"ok":true,"issuer":"mock","chainId":43113,"blockers":[]}
+# warnings identify the local no-money failsafes
 ```
 
-`blockers` is non-empty when `decide()` will refuse, and says why.
+`blockers` is non-empty only when a required provider is disabled.
 
 ## Scripts
 
 | | |
 |---|---|
-| `pnpm dev` | all apps |
-| `pnpm dev:api` | just the API |
+| `pnpm dev` | backend and frontend together |
+| `pnpm dev:backend` | just the backend |
+| `pnpm dev:frontend` | just the frontend |
 | `pnpm test` | vitest, all packages |
 | `pnpm typecheck` | tsc across the workspace |
 | `pnpm lint` / `pnpm format` | biome |
@@ -55,49 +57,39 @@ curl localhost:8787/v1/health
 ## Layout
 
 ```
-apps/
-  api/            :8787  hono + zod + better-sqlite3 + viem
-  demo-store/     :4030  hono
-frontend/         :4040  vite + react, the Happy concierge UI
+backend/          :8787  Hono + DynamoDB + SSE + real-service adapters
+frontend/         :4040  Vite + React, the Happy concierge UI
+terraform/               ECS/Fargate + ALB + CloudFront + S3 + DynamoDB
 packages/
-  pay/                   mandates, decide(), ledger, x402 client, issuer adapter
   shared/                wire schemas, chain constants, money units
-aa-probe/                ERC-4337 spikes, verified on Fuji
+apps/                    legacy prototypes; not used by the current runtime
 ```
 
-`packages/pay` holds the payment logic and the shopping agent consumes it
-in-process — both sides are TypeScript in one repo, so HTTP between them would
-buy nothing. The mock issuer lives behind an `IssuerAdapter` inside
-`packages/pay` rather than as its own service, swapped by the `ISSUER` env var.
+`backend/` implements the complete frontend contract and owns the safety
+decision. It stores production state in DynamoDB, sends jobs to the separately
+owned Scout runtime, receives authenticated progress and livestream callbacks,
+grants a separate Closer agent permission to pull one exact-value card, and tracks checkout. See
+[`backend/README.md`](./backend/README.md) for both integration protocols.
 
-`apps/api` is currently just a health endpoint and the zod boot-time env
-validation. The HTTP wrapper over `packages/pay` is deferred; it's about 40
-lines over the same functions if something ends up needing it.
-
-`frontend/` is the concierge UI, built from the design handoff in
-`design_handoff_happy_concierge/`. It runs entirely on mock data and timers —
-no backend calls yet — so it starts and demos without the API. Run it with
-`pnpm dev:frontend`; `pnpm dev` still starts only the services under `apps/`.
+`frontend/` can still run with its in-browser mock when `VITE_API_BASE_URL` is
+unset. When the variable is set, every screen uses the backend and never silently
+falls back. Scout tiles embed `liveStreamUrl` from the real agent callback.
 
 ## Configuration
 
-One `.env` at the repo root, read by every service. Copy `.env.example` and go;
-the defaults need no credentials and reach no external service.
+One `.env` at the repo root is read by the backend. Copy `.env.example`, add a fresh
+`OPENAI_API_KEY`, and set `PLANNER_MODE=openai` for real chat-to-wishlist planning.
+Add external `AGENT_*`, `CARD_*`, and `PURCHASE_AGENT_*` values when the owning teams
+provide them. Until then, local mode runs the complete website against
+clearly labelled Scout/card/Closer failsafes; set a provider to `disabled` if you
+want its dependent mutations to fail closed instead.
 
-`apps/api/src/env.ts` validates it at boot and exits with a per-field error
-rather than failing later, mid-payment.
-
-Three variables switch rails. Nothing else should differ between environments:
-
-```
-ISSUER=mock                    # mock | straitsx
-CARD_API_BASE=...              # sandbox | production
-ALLOWED_NETWORK=eip155:43113   # fuji | mainnet
-```
-
-`ISSUER=mock` runs the full flow — rules, ledger, card, checkout, activity feed —
-on your laptop, unlimited times, for free. Set `ISSUER=straitsx` only when you
-mean it. **There are no refunds on this rail.**
+Every activity mutation writes the latest document and an immutable transition
+checkpoint. Production sets `DATA_STORE=dynamodb`; local development defaults to memory,
+so local checkpoints still reset when the backend process restarts.
+The full AWS deployment and two-pass image bootstrap are in
+[`terraform/README.md`](./terraform/README.md). **There are no refunds on the
+live rail.**
 
 ## Money units
 

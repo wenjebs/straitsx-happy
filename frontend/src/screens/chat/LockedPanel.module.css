@@ -36,6 +36,8 @@
 
 .name {
   font-size: 13px;
+  flex: 1;
+  min-width: 0;
 }
 
 .range {
@@ -43,6 +45,7 @@
   font-size: 11px;
   color: var(--text-quaternary);
   margin-left: auto;
+  flex: none;
 }
 
 .dispatch {

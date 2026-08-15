@@ -4,23 +4,12 @@ import styles from "./ActivityFeed.module.css";
 import { Chevrons } from "./Chevrons";
 
 interface ActivityFeedProps {
-  running: Activity | null;
-  archived: Activity[];
-  /** Highlights the running card while its flow is on screen. */
-  currentOnScreen: boolean;
-  onOpenCurrent: () => void;
-  onOpenArchive: (id: string) => void;
+  activities: Activity[];
+  onOpen: (id: string) => void;
   onNew: () => void;
 }
 
-export function ActivityFeed({
-  running,
-  archived,
-  currentOnScreen,
-  onOpenCurrent,
-  onOpenArchive,
-  onNew,
-}: ActivityFeedProps) {
+export function ActivityFeed({ activities, onOpen, onNew }: ActivityFeedProps) {
   return (
     <aside className={styles.feed}>
       <div className={styles.head}>
@@ -37,31 +26,15 @@ export function ActivityFeed({
       </div>
 
       <div className={styles.list}>
-        {running && (
-          <Card activity={running} highlighted={currentOnScreen} onOpen={onOpenCurrent} />
-        )}
-        {archived.map((activity) => (
-          <Card
-            key={activity.id}
-            activity={activity}
-            highlighted={false}
-            onOpen={() => onOpenArchive(activity.id)}
-          />
+        {activities.map((activity) => (
+          <Card key={activity.id} activity={activity} onOpen={() => onOpen(activity.id)} />
         ))}
       </div>
     </aside>
   );
 }
 
-function Card({
-  activity,
-  highlighted,
-  onOpen,
-}: {
-  activity: Activity;
-  highlighted: boolean;
-  onOpen: () => void;
-}) {
+function Card({ activity, onOpen }: { activity: Activity; onOpen: () => void }) {
   /*
    * Chip and bar both come from the activity's own status — never from what is
    * currently displayed, or a card can read "drafting" while its bar shows
@@ -73,11 +46,7 @@ function Card({
   const live = activity.status === "live";
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={`${styles.card} ${highlighted ? styles.current : ""}`}
-    >
+    <button type="button" onClick={onOpen} className={styles.card}>
       <div className={styles.row}>
         <span
           className={`${styles.dot} ${live ? styles.live : ""} ${

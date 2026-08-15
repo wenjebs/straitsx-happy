@@ -13,6 +13,7 @@ interface WishlistCardProps {
 /** Goal decomposition: the proposed wishlist, editable before approval. */
 export function WishlistCard({ activity, state, actions }: WishlistCardProps) {
   const cap = state.mandate?.actCap ?? 2500;
+  const editable = activity.stage === "wishlist";
 
   return (
     <div className={styles.card}>
@@ -33,7 +34,7 @@ export function WishlistCard({ activity, state, actions }: WishlistCardProps) {
             <div className={styles.spec}>{item.spec}</div>
           </div>
           <span className={styles.amount}>{item.budget}</span>
-          {state.editing && (
+          {editable && state.editing && (
             <button
               type="button"
               className={styles.remove}
@@ -48,7 +49,7 @@ export function WishlistCard({ activity, state, actions }: WishlistCardProps) {
       ))}
 
       <div className={styles.foot}>
-        {state.editing && (
+        {editable && state.editing && (
           <>
             <input
               className={styles.addInput}
@@ -69,16 +70,22 @@ export function WishlistCard({ activity, state, actions }: WishlistCardProps) {
             </button>
           </>
         )}
-        <button type="button" className={styles.secondary} onClick={actions.toggleEditing}>
-          {state.editing ? "Done editing" : "Edit list"}
-        </button>
         <button
           type="button"
-          className={styles.primary}
-          onClick={() => void actions.approveWishlist()}
+          className={styles.secondary}
+          onClick={editable ? actions.toggleEditing : actions.requestWishlistEdit}
         >
-          Approve &amp; continue
+          {editable && state.editing ? "Done editing" : "Edit list"}
         </button>
+        {editable && (
+          <button
+            type="button"
+            className={styles.primary}
+            onClick={() => void actions.approveWishlist()}
+          >
+            Approve &amp; continue
+          </button>
+        )}
       </div>
     </div>
   );

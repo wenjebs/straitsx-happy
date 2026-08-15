@@ -7,8 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter \"./apps/**\" dev",
-    "dev:api": "pnpm --filter @happy/api dev",
+    "dev": "pnpm --parallel --filter @happy/backend --filter @happy/frontend dev",
+    "dev:api": "pnpm --filter @happy/backend dev",
+    "dev:backend": "pnpm --filter @happy/backend dev",
     "dev:frontend": "pnpm --filter @happy/frontend dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",

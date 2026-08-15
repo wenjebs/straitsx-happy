@@ -42,12 +42,36 @@
   border-color: var(--text-primary);
 }
 
-/* Placeholder awaiting real product imagery; keep the box size and radius. */
 .image {
-  height: 96px;
+  height: 128px;
   background: var(--img-placeholder);
   display: grid;
   place-items: center;
+  overflow: hidden;
+}
+
+.photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.credit {
+  display: block;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border-faint);
+  color: var(--text-quaternary);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.credit:hover {
+  color: var(--text-secondary);
 }
 
 .imageLabel {

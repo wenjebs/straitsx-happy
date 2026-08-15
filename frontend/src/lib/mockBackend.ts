@@ -30,6 +30,7 @@ import {
 } from "../data/catalog";
 import type {
   Activity,
+  ActivityCheckpoint,
   ActivityEvent,
   AgentState,
   Clarification,
@@ -212,6 +213,38 @@ class MockBackend {
     return archived;
   }
 
+  async getActivityHistory(id: string): Promise<ActivityCheckpoint[]> {
+    const activity = await this.getActivity(id);
+    return [
+      {
+        checkpointId: `mock-${id}`,
+        activityId: id,
+        userId: "mock-user",
+        reason: activity.status === "completed" ? "purchase.completed" : "activity.cancelled",
+        createdAt: activity.createdAt,
+        stage: activity.stage,
+        status: activity.status,
+        activity,
+      },
+    ];
+  }
+
+  async cancelActivity(_id: string): Promise<Activity> {
+    if (this.current?.status !== "live") throw new Error("no live activity");
+    this.clearTimers();
+    this.current.status = "cancelled";
+    this.current.searchPlaying = false;
+    this.current.completedAt = new Date().toISOString();
+    this.current.displayTs = "now";
+    this.current.messages.push({
+      id: nextId("msg"),
+      role: "assistant",
+      text: "This activity was cancelled. Happy will ignore any later agent updates.",
+    });
+    this.snapshot();
+    return this.clone(this.current);
+  }
+
   async createActivity(goal: string): Promise<Activity> {
     this.clearTimers();
     this.tick = 0;
@@ -285,6 +318,25 @@ class MockBackend {
     this.current.clarifications = [this.clarificationFor("gpu")].filter(
       (c): c is Clarification => !!c,
     );
+    this.snapshot();
+    return this.clone(this.current);
+  }
+
+  async reopenWishlist(_id: string): Promise<Activity> {
+    if (this.current?.stage !== "curate") {
+      throw new Error("activity is not awaiting clarification");
+    }
+    const wishlistMessageIndex = this.current.messages.findIndex(
+      (message) => message.role === "assistant" && message.card === "wishlist",
+    );
+    if (wishlistMessageIndex < 0) throw new Error("activity has no prepared wishlist");
+    this.current.stage = "wishlist";
+    this.current.messages = this.current.messages.slice(0, wishlistMessageIndex + 1);
+    this.current.clarifications = this.current.clarifications.map((clarification) => {
+      const reset = { ...clarification };
+      delete reset.chosen;
+      return reset;
+    });
     this.snapshot();
     return this.clone(this.current);
   }

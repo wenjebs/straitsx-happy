@@ -55,6 +55,9 @@ export interface CuratorOption {
   why: string;
   imgLabel: string;
   imageUrl?: string;
+  /** Click-through to the original image and licence details. */
+  imageSourceUrl?: string;
+  imageAttribution?: string;
 }
 
 export interface Clarification {
@@ -108,6 +111,8 @@ export interface AgentState {
   stage: StageIndex;
   action: string;
   queued: boolean;
+  /** Embeddable live browser stream supplied by the remote Scout service. */
+  liveStreamUrl?: string;
 }
 
 export interface ExecutionRow {
@@ -115,6 +120,10 @@ export interface ExecutionRow {
   /** 0 queued, 1-3 in flight, 4 purchased. */
   step: number;
   state: "queued" | "live" | "purchased";
+  /** Current Closer status text supplied by the backend callback. */
+  action?: string;
+  /** Embeddable live browser stream supplied by the Closer agent. */
+  liveStreamUrl?: string;
 }
 
 export interface LogLine {
@@ -165,6 +174,17 @@ export interface Activity {
   totalMinor: number;
   /** Archived activities only: the line items to show in the archive view. */
   archiveLines?: { name: string; seller: string; price: string }[];
+}
+
+export interface ActivityCheckpoint {
+  checkpointId: string;
+  activityId: string;
+  userId: string;
+  reason: string;
+  createdAt: string;
+  stage: ActivityStage;
+  status: ActivityStatus;
+  activity: Activity;
 }
 
 export interface Wallet {
@@ -301,6 +321,10 @@ export function getActivity(id: string): Promise<Activity> {
   return isLive() ? get(`/v1/activities/${id}`) : mockBackend.getActivity(id);
 }
 
+export function getActivityHistory(id: string): Promise<ActivityCheckpoint[]> {
+  return isLive() ? get(`/v1/activities/${id}/checkpoints`) : mockBackend.getActivityHistory(id);
+}
+
 /** Starts a new activity from a free-text goal. Returns it already in `wishlist`. */
 export function createActivity(goal: string): Promise<Activity> {
   return isLive() ? post("/v1/activities", { goal }) : mockBackend.createActivity(goal);
@@ -320,6 +344,11 @@ export function removeWishlistItem(id: string, itemId: string): Promise<Activity
 
 export function approveWishlist(id: string): Promise<Activity> {
   return isLive() ? post(`/v1/activities/${id}/wishlist/approve`) : mockBackend.approveWishlist(id);
+}
+
+/** Returns curation to the editable wishlist and discards all option choices. */
+export function reopenWishlist(id: string): Promise<Activity> {
+  return isLive() ? post(`/v1/activities/${id}/wishlist/reopen`) : mockBackend.reopenWishlist(id);
 }
 
 /** Locks one curator option for an item. */
@@ -348,9 +377,8 @@ export function rejectPick(id: string, itemId: string): Promise<Activity> {
 }
 
 /**
- * Begins checkout. On the live rail this issues real single-use cards and
- * spends real money, so it is deliberately not retried anywhere in this client
- * and the UI confirms before calling it.
+ * Begins checkout. The backend enforces sandbox/remote provider mode and owns
+ * all retries, so it is deliberately not retried anywhere in this client.
  *
  * `idempotencyKey` lets the backend collapse a duplicate submission (double
  * click, refresh mid-flight) into one execution rather than two.
@@ -359,6 +387,11 @@ export function confirmPurchase(id: string, idempotencyKey: string): Promise<Act
   return isLive()
     ? post(`/v1/activities/${id}/purchase`, { idempotencyKey })
     : mockBackend.confirmPurchase(id);
+}
+
+/** Stops all future work for a live activity and rejects late agent callbacks. */
+export function cancelActivity(id: string): Promise<Activity> {
+  return isLive() ? post(`/v1/activities/${id}/cancel`) : mockBackend.cancelActivity(id);
 }
 
 // ---------------------------------------------------------------------------

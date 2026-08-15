@@ -395,7 +395,7 @@ export const PROFILE_ROWS: readonly { k: string; v: string }[] = [
 ];
 
 export const SUGGESTIONS = [
-  "build me a budget gaming PC under S$1,600",
+  "buy a USB-C cable and phone stand under S$30 each",
   "restock my pantry, same brands as last month",
   "here is a list of 8 things for a new apartment",
 ] as const;

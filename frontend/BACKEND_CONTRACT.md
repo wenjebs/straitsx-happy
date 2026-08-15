@@ -120,7 +120,10 @@ Every activity endpoint returns this. Optional fields may be omitted.
       "options": [
         { "name": "RTX 4060 8GB", "range": "S$399 – S$489",
           "why": "Best 1080p per dollar with DLSS 3 and low power draw.",
-          "imgLabel": "gpu · 4060", "imageUrl": null }
+          "imgLabel": "gpu · 4060",
+          "imageUrl": "https://upload.wikimedia.org/example.jpg",
+          "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Example.jpg",
+          "imageAttribution": "Photographer · CC BY-SA 4.0 · Wikimedia Commons" }
       ] }
   ],
 
@@ -131,7 +134,8 @@ Every activity endpoint returns this. Optional fields may be omitted.
   "agents": [
     { "agentId": "ag-1004", "itemId": "gpu", "slot": 0,
       "url": "bizgram.com.sg/rtx-4060", "stage": 2,
-      "action": "pulling seller history", "queued": false }
+      "action": "pulling seller history", "queued": false,
+      "liveStreamUrl": "https://agents.example/streams/ag-1004" }
   ],
   "searchPlaying": true,
   "searchStartedAt": "2026-08-15T14:33:10Z",
@@ -150,7 +154,9 @@ Every activity endpoint returns this. Optional fields may be omitted.
   ],
 
   "execution": [
-    { "itemId": "gpu", "step": 4, "state": "purchased" }
+    { "itemId": "gpu", "step": 2, "state": "live",
+      "action": "bizgram-asia/checkout · autofill ok",
+      "liveStreamUrl": "https://closer.example/streams/attempt-1" }
   ],
 
   "log": [
@@ -170,9 +176,13 @@ Every activity endpoint returns this. Optional fields may be omitted.
 | `itemProgress[].queued` | `true` before an item's agents are dispatched. Renders a hollow dashed dot and dims its tiles. |
 | `agents[].slot` | `0` is the lead agent, `1` trails one stage behind. Send exactly two per item — the screen is built around twelve tiles for six items. |
 | `agents[].action` | Free text, shown verbatim under the tile. Suggested: `crawling listing pages`, `reading spec table`, `pulling seller history`, `diffing 6 candidates`, `locked candidate`, `waiting for a slot`. |
+| `agents[].liveStreamUrl` | Optional embeddable URL for the Scout's live browser viewport. The frontend renders it in a sandboxed iframe. Until supplied, the tile says it is waiting for the stream; there is no simulated page animation. The stream server must permit framing via its CSP / `X-Frame-Options` policy. |
 | `execution[].step` | `0` queued, `1-3` in flight, `4` purchased. Drives a progress fill at `step/4`. |
+| `execution[].action` | Optional current Closer status, shown above its livestream. |
+| `execution[].liveStreamUrl` | Optional embeddable Closer browser stream. It is rendered on the execution screen and must permit framing. |
 | `messages[].card` | Which in-chat card renders under the text. `thinking` \| `wishlist` \| `curator` \| `locked`. Omit for plain text. |
-| `imageUrl` | Optional on listings and curator options. When present the frontend renders it in place of the striped placeholder, same box size and radius. |
+| `imageUrl` | Optional on listings and curator options. When present the frontend renders the real image in place of the striped placeholder. Happy enriches missing curator images from Wikimedia Commons without blocking planning if the public service is unavailable. |
+| `imageSourceUrl`, `imageAttribution` | Optional on curator options. They make every enriched image traceable to its source and licence. |
 
 ---
 
@@ -186,34 +196,61 @@ All paths are relative to `VITE_API_BASE_URL`.
 |---|---|---|---|
 | `GET` | `/v1/activities` | — | `Activity[]` |
 | `GET` | `/v1/activities/:id` | — | `Activity` |
+| `GET` | `/v1/activities/:id/checkpoints` | — | `ActivityCheckpoint[]` |
 | `POST` | `/v1/activities` | `{ "goal": string }` | `Activity` |
 | `POST` | `/v1/activities/:id/wishlist/items` | `{ "name": string }` | `Activity` |
 | `DELETE` | `/v1/activities/:id/wishlist/items/:itemId` | — | `Activity` |
 | `POST` | `/v1/activities/:id/wishlist/approve` | — | `Activity` |
+| `POST` | `/v1/activities/:id/wishlist/reopen` | — | `Activity` |
 | `POST` | `/v1/activities/:id/clarifications/:itemId` | `{ "option": string }` | `Activity` |
 | `POST` | `/v1/activities/:id/dispatch` | — | `Activity` |
 | `POST` | `/v1/activities/:id/search/pause` | — | `Activity` |
 | `POST` | `/v1/activities/:id/search/resume` | — | `Activity` |
 | `POST` | `/v1/activities/:id/shortlist/:itemId/reject` | — | `Activity` |
 | `POST` | `/v1/activities/:id/purchase` | `{ "idempotencyKey": string }` | `Activity` |
+| `POST` | `/v1/activities/:id/cancel` | — | `Activity` |
 | `GET` | `/v1/activities/:id/events` | — | `text/event-stream` (§5) |
 
-`GET /v1/activities` drives the activity feed. Return the running activity (if
-any) with `status: "live"`, plus completed and cancelled ones. **At most one
-activity may be `live`** — the frontend picks the first one it finds and treats
-it as the running activity.
+`GET /v1/activities` drives the activity feed. Return every activity newest
+first, including all records with `status: "live"` plus completed and cancelled
+ones.
 
 `POST /v1/activities` creates from a free-text goal and should return with
 `stage: "wishlist"` and the two opening messages already present (the user's
 goal, and an assistant message with `card: "thinking"`). Emit a snapshot over
 SSE when the real wishlist replaces the thinking state.
 
+More than one activity may have `status: "live"`. Starting a new activity must
+not cancel, replace, or reject another in-progress activity. The client lists
+all activities on the blank new-chat page and subscribes to every live activity,
+while a focused activity is displayed without the activity list beside it.
+
+The backend persists each transition as both the current activity document and an immutable full
+checkpoint. In particular, `wishlist.prepared` must commit before approval. The approval endpoint
+reloads that stored document and advances it to curation; it does not reuse an in-process planner
+result.
+
+`POST .../wishlist/reopen` is valid in `curate`. It returns the activity to
+`wishlist`, removes every message after the prepared wishlist card, clears every
+`clarifications[].chosen`, and persists the transition as `wishlist.reopened`.
+The frontend asks for confirmation before calling it because those choices are
+intentionally discarded.
+
 `POST .../clarifications/:itemId` locks one option. When the last ambiguous item
 is resolved, append the assistant message with `card: "locked"` — that is what
-renders the locked-items panel and the "Dispatch agents" button.
+renders the "Items ready for search" panel and the "Dispatch agents" button.
+That panel lists the complete wishlist: the selected option for clarified items,
+and the existing specification and budget for items that were already spec-bound.
 
-Archived activities (`status` `completed` or `cancelled`) need only
-`id`, `title`, `status`, `displayTs`, `totalMinor` and `archiveLines`.
+`POST .../cancel` is valid for every live stage. It marks the activity
+`cancelled`, stops provider work where the provider supports cancellation,
+invalidates unused purchase-card access, persists a final checkpoint, and causes
+all late agent callbacks to return `409`. Cancellation cannot reverse an order
+that a merchant already accepted, so the frontend warns the user during `exec`.
+
+Archived activities (`status` `completed` or `cancelled`) retain their full
+activity document. The summary uses `archiveLines`; the history view reads the
+immutable full documents from `/checkpoints` to reconstruct chat through buy.
 
 ### Wallet, mandate, settings, profile
 
@@ -256,7 +293,7 @@ Card `status` follows the lifecycle `issued → viewed → used → expired`.
 }
 
 // Settings
-{ "notify": true, "sandbox": false, "region": "Singapore · SGD", "dataRetention": "90 days" }
+{ "notify": true, "sandbox": true, "region": "Singapore · SGD", "dataRetention": "90 days" }
 
 // Profile
 { "name": "Tricia Lim", "email": "tricia.lim@hey.sg", "initials": "TL",
@@ -366,15 +403,19 @@ What the backend must do:
   anything, and reject with a readable message if it fails.
 - Issue cards at exactly the approved amount, so an agent cannot overspend a card
   it holds.
+- Give Closer a short-lived, attempt-bound grant and issue the card only when
+  Closer actively claims it. Do not create or push the card while queuing the job.
 - Drive execution strictly sequentially: four steps per item, one item at a time,
   emitting `exec.step` and `log.line` as each actually happens.
+- Treat the browser purchase as asynchronous: accept Closer callbacks, reject stale
+  `attemptId`s, deduplicate `eventId`s, and debit only after `order.confirmed`.
 - On completion emit `activity.completed` **and** `wallet.updated`, so the
   balance and the feed card update without a refetch.
 
 Suggested log line forms, which the UI renders verbatim:
 
 ```
-card 4319 4400 issued · limit S$429.00
+Closer claimed card 4400 · limit S$429.00
 bizgram-asia/checkout · autofill ok
 placing order S$429.00
 order #SG830142 confirmed · card expired
@@ -389,6 +430,7 @@ POST /v1/activities                    { goal }            -> stage: wishlist
   SSE activity.snapshot                                     (thinking -> wishlist card)
 POST /v1/activities/:id/wishlist/approve                   -> stage: curate
   SSE activity.snapshot                                     (first curator card)
+# Optional reset: POST .../wishlist/reopen -> wishlist, edit, then approve again
 POST /v1/activities/:id/clarifications/gpu   { option }
   SSE activity.snapshot                                     (second curator card)
 POST /v1/activities/:id/clarifications/case  { option }

@@ -105,12 +105,48 @@
   color: var(--text-quaternary);
 }
 
-.thinkingDot {
-  width: 6px;
-  height: 6px;
+.thinkingDots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 10px;
+}
+
+.thinkingDots span {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--text-primary);
-  animation: h-blink 1s ease-in-out infinite;
+  background: currentColor;
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+
+.thinkingDots span:nth-child(2) {
+  animation-delay: 160ms;
+}
+
+.thinkingDots span:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+@keyframes thinking-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0) scale(0.82);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinkingDots span {
+    animation: none;
+    opacity: 0.65;
+  }
 }
 
 .composerWrap {
