@@ -50,6 +50,15 @@ export function Sidebar({ open, screen, onPurchase, onNavigate, onToggle }: Side
           <GearIcon />
           {open && <span>Settings</span>}
         </button>
+        <button
+          type="button"
+          className={item(screen === "browsertest")}
+          onClick={() => onNavigate("browsertest")}
+          title="AgentCore remote browser — dev only"
+        >
+          <PanelIcon />
+          {open && <span>Browser test</span>}
+        </button>
       </nav>
 
       <div className={styles.footer}>

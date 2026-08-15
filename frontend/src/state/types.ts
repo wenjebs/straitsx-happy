@@ -8,7 +8,14 @@ import type {
   Wallet,
 } from "../lib/Api";
 
-export type Screen = "purchase" | "wallet" | "mandate" | "settings" | "profile";
+export type Screen =
+  | "purchase"
+  | "wallet"
+  | "mandate"
+  | "settings"
+  | "profile"
+  /** Dev-only surface for the AWS AgentCore remote browser. See BrowserTestScreen. */
+  | "browsertest";
 
 /** null = new-chat/activity-list page; otherwise the displayed activity id. */
 export type Focused = string | null;

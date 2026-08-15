@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config.js";
 import type {
   Activity,
+  PurchaseAttempt,
   ExecutionRow,
   Listing,
   LogLine,
@@ -17,6 +18,7 @@ import type { CardProvider, IssuedCard } from "../providers/card.js";
 import type { PurchaseAgentProvider } from "../providers/purchaseAgent.js";
 import type { Repository } from "../repository.js";
 import type { PurchaseAgentCallback } from "../schemas.js";
+import { withWallet } from "./walletLock.js";
 
 export class PurchaseService {
   constructor(
@@ -77,9 +79,13 @@ export class PurchaseService {
       userId: activity.userId,
       idempotencyKey,
       status: "running",
-      itemIndex: 0,
-      candidateIndex: 0,
-      attemptIndex: 0,
+      attempts: {},
+      progress: Object.fromEntries(
+        activity.shortlist.map((pick) => [
+          pick.itemId,
+          { candidateIndex: 0, attemptIndex: 0, done: false },
+        ]),
+      ),
       processedEventIds: [],
       updatedAt: new Date().toISOString(),
     };
@@ -88,7 +94,7 @@ export class PurchaseService {
       this.repository.putPurchaseRun(run),
     ]);
     this.snapshot(activity);
-    void this.startNextAttempt(activityId).catch((error) => this.failRun(activityId, error));
+    void this.startAttempts(activityId).catch((error) => this.failRun(activityId, error));
     return activity;
   }
 
@@ -103,21 +109,31 @@ export class PurchaseService {
 
     let agentWarning = "";
     if (run?.status === "running") {
-      const attemptId = run.attemptId;
+      // Every live attempt, not just one: with several browsers in flight, cancelling the first
+      // and leaving the rest running is how a cancelled activity still spends money.
+      const live = Object.values(run.attempts);
       run.status = "cancelled";
       run.updatedAt = new Date().toISOString();
       await this.repository.putPurchaseRun(run);
-      await this.expireCurrentCard(run);
-      this.clearAttempt(run);
+      for (const attempt of live) {
+        await this.expireAttemptCard(run, attempt);
+        this.clearAttempt(run, attempt.attemptId);
+      }
       await this.repository.putPurchaseRun(run);
-      try {
-        await this.purchaseAgents.cancelPurchase({
-          activityId,
-          ...(attemptId ? { attemptId } : {}),
-          reason: "Cancelled by the user in Happy.",
-        });
-      } catch (error) {
-        agentWarning = ` · remote Closer did not acknowledge cancellation: ${asMessage(error)}`;
+      const failures: string[] = [];
+      for (const attempt of live.length > 0 ? live : [undefined]) {
+        try {
+          await this.purchaseAgents.cancelPurchase({
+            activityId,
+            ...(attempt ? { attemptId: attempt.attemptId } : {}),
+            reason: "Cancelled by the user in Happy.",
+          });
+        } catch (error) {
+          failures.push(asMessage(error));
+        }
+      }
+      if (failures.length > 0) {
+        agentWarning = ` · remote Closer did not acknowledge cancellation: ${failures.join("; ")}`;
       }
     }
 
@@ -162,12 +178,16 @@ export class PurchaseService {
     if (run.status !== "running" || activity.status !== "live" || activity.stage !== "exec") {
       throw new HttpError(409, `Purchase run for ${activityId} is not running.`);
     }
-    const pick = activity.shortlist[run.itemIndex];
-    const item = pick && activity.wishlist.find((row) => row.id === pick.itemId);
-    if (!pick || !item) throw new HttpError(409, "Purchase run cursor is outside the shortlist.");
-    if (event.attemptId !== run.attemptId || event.itemId !== item.id) {
+    // Routed by the attemptId the callback carries, never by a shared cursor. With several
+    // attempts live at once a cursor would attribute one item's event to whichever happened to be
+    // current.
+    const attempt = run.attempts[event.attemptId];
+    if (!attempt || event.itemId !== attempt.itemId) {
       throw new HttpError(409, "Purchase callback belongs to a stale or unknown attempt.");
     }
+    const pick = activity.shortlist.find((row) => row.itemId === attempt.itemId);
+    const item = pick && activity.wishlist.find((row) => row.id === pick.itemId);
+    if (!pick || !item) throw new HttpError(409, "Purchase attempt is outside the shortlist.");
 
     run.processedEventIds = [...run.processedEventIds.slice(-99), event.eventId];
     run.updatedAt = new Date().toISOString();
@@ -193,24 +213,26 @@ export class PurchaseService {
         await this.repository.putPurchaseRun(run);
         break;
       case "order.confirmed":
-        await this.confirmOrder(activity, run, item, event.orderId, event.message);
+        await this.confirmOrder(activity, run, attempt, item, event.orderId, event.message);
         break;
-      case "purchase.failed":
-        await this.expireCurrentCard(run);
+      case "purchase.failed": {
+        await this.expireAttemptCard(run, attempt);
         await this.appendSystemLog(
           activity,
           item,
-          `attempt ${run.attemptIndex + 1} failed · ${event.message}`,
+          `attempt ${attempt.attemptIndex + 1} failed · ${event.message}`,
         );
-        if (event.retryable) run.attemptIndex += 1;
+        const progress = this.progressFor(run, attempt.itemId);
+        if (event.retryable) progress.attemptIndex += 1;
         else {
-          run.candidateIndex += 1;
-          run.attemptIndex = 0;
+          progress.candidateIndex += 1;
+          progress.attemptIndex = 0;
         }
-        this.clearAttempt(run);
+        this.clearAttempt(run, attempt.attemptId);
         await this.repository.putPurchaseRun(run);
-        void this.startNextAttempt(activityId).catch((error) => this.failRun(activityId, error));
+        void this.startAttempts(activityId).catch((error) => this.failRun(activityId, error));
         break;
+      }
     }
     return activity;
   }
@@ -224,19 +246,20 @@ export class PurchaseService {
     if (run?.status !== "running" || activity.status !== "live" || activity.stage !== "exec") {
       throw new HttpError(409, "This purchase attempt is not running.");
     }
-    if (run.attemptId !== attemptId) {
+    const attempt = run.attempts[attemptId];
+    if (!attempt) {
       throw new HttpError(409, "This card grant belongs to a stale purchase attempt.");
     }
-    if (!run.cardGrantHash || !safeHashEqual(hashGrant(grantToken), run.cardGrantHash)) {
+    if (!attempt.cardGrantHash || !safeHashEqual(hashGrant(grantToken), attempt.cardGrantHash)) {
       throw new HttpError(401, "Card grant token is missing or invalid.");
     }
-    if (!run.cardGrantExpiresAt || Date.parse(run.cardGrantExpiresAt) <= Date.now()) {
+    if (!attempt.cardGrantExpiresAt || Date.parse(attempt.cardGrantExpiresAt) <= Date.now()) {
       throw new HttpError(410, "Card grant has expired.");
     }
 
-    const pick = activity.shortlist[run.itemIndex];
+    const pick = activity.shortlist.find((row) => row.itemId === attempt.itemId);
     const item = pick && activity.wishlist.find((row) => row.id === pick.itemId);
-    const listing = pick && [pick.listing, ...(pick.alternates ?? [])][run.candidateIndex];
+    const listing = pick && [pick.listing, ...(pick.alternates ?? [])][attempt.candidateIndex];
     if (!item || !listing) throw new HttpError(409, "Purchase cursor is no longer valid.");
     const [mandate, wallet] = await Promise.all([
       this.repository.getMandate(activity.userId),
@@ -246,8 +269,12 @@ export class PurchaseService {
     if (listing.amountMinor > wallet.balanceMinor) {
       throw new HttpError(422, "Wallet balance is below the exact card amount.");
     }
-    const attemptKey = `${run.idempotencyKey}:${item.id}:${run.candidateIndex}:${run.attemptIndex}`;
-    const firstClaim = !run.cardClaimedAt;
+    if (this.cards.mode === "local" && !settings.sandbox) {
+      throw new HttpError(409, "Local card claims require Sandbox mode.");
+    }
+
+    const attemptKey = `${run.idempotencyKey}:${item.id}:${attempt.candidateIndex}:${attempt.attemptIndex}`;
+    const firstClaim = !attempt.cardClaimedAt;
     const card = await this.cards.issueCard({
       activity,
       item,
@@ -255,26 +282,34 @@ export class PurchaseService {
       mandate,
       idempotencyKey: attemptKey,
     });
-    if (run.cardId && run.cardId !== card.cardId) {
+    if (attempt.cardId && attempt.cardId !== card.cardId) {
       throw new HttpError(502, "Card provider violated idempotency for this attempt.");
     }
-    run.cardId = card.cardId;
-    run.cardLast4 = card.last4;
-    run.cardClaimedAt ??= new Date().toISOString();
+    attempt.cardId = card.cardId;
+    attempt.cardLast4 = card.last4;
+    attempt.cardClaimedAt ??= new Date().toISOString();
     run.updatedAt = new Date().toISOString();
-    if (!wallet.cards.some((row) => row.pan.endsWith(card.last4))) {
-      wallet.cards.unshift({
-        pan: `•••• •••• ${card.last4}`,
-        amount: listing.price,
-        status: "issued",
-      });
-    }
-    await Promise.all([
-      this.repository.putWallet(activity.userId, wallet),
-      this.repository.putPurchaseRun(run),
-    ]);
+
+    /*
+     * The wallet read above is now stale: `issueCard` can take 45 seconds, and with several
+     * attempts claiming at once each one held its own copy. Whoever wrote last erased the others'
+     * card rows. Re-read inside a per-user lock and mutate that.
+     */
+    const freshWallet = await withWallet(activity.userId, async () => {
+      const current = await this.repository.getWallet(activity.userId);
+      if (!current.cards.some((row) => row.pan.endsWith(card.last4))) {
+        current.cards.unshift({
+          pan: `•••• •••• ${card.last4}`,
+          amount: listing.price,
+          status: "issued",
+        });
+      }
+      await this.repository.putWallet(activity.userId, current);
+      return current;
+    });
+    await this.repository.putPurchaseRun(run);
     if (firstClaim) {
-      this.events.emit(activity.id, { type: "wallet.updated", wallet });
+      this.events.emit(activity.id, { type: "wallet.updated", wallet: freshWallet });
       await this.emitStep(
         activity,
         item,
@@ -286,91 +321,224 @@ export class PurchaseService {
     return card;
   }
 
-  private async startNextAttempt(activityId: string): Promise<void> {
+  /** Live attempts allowed at once. Each is a separate browser and a separate card. */
+  private get concurrency(): number {
+    return Math.max(1, Number(process.env.PURCHASE_CONCURRENCY ?? 10));
+  }
+
+  private progressFor(run: PurchaseRun, itemId: string) {
+    const existing = run.progress[itemId];
+    if (existing) return existing;
+    const fresh = { candidateIndex: 0, attemptIndex: 0, done: false };
+    run.progress[itemId] = fresh;
+    return fresh;
+  }
+
+  /**
+   * Starts attempts for every shortlist item that needs one, up to the concurrency limit.
+   *
+   * Called after the purchase begins and again whenever an attempt ends, so a finished slot is
+   * immediately refilled. Each item carries its own candidate and retry cursors, so one item
+   * exhausting its alternates does not disturb the others.
+   *
+   * Failures to START are handled per item rather than aborting the run: one merchant refusing a
+   * job should not cancel five other purchases that are working.
+   */
+  private async startAttempts(activityId: string): Promise<void> {
     const [activity, run] = await Promise.all([
       this.getActivity(activityId),
       this.repository.getPurchaseRun(activityId),
     ]);
-    if (run?.status !== "running" || activity.status !== "live" || run.attemptId) return;
-    const mandate = await this.repository.getMandate(activity.userId);
+    if (run?.status !== "running" || activity.status !== "live") return;
 
-    while (run.itemIndex < activity.shortlist.length) {
-      const pick = activity.shortlist[run.itemIndex];
-      if (!pick) break;
+    const [mandate, settings] = await Promise.all([
+      this.repository.getMandate(activity.userId),
+      this.repository.getSettings(activity.userId),
+    ]);
+
+    const inFlight = new Set(Object.values(run.attempts).map((a) => a.itemId));
+    const starts: Promise<void>[] = [];
+
+    for (const pick of activity.shortlist) {
+      if (Object.keys(run.attempts).length + starts.length >= this.concurrency) break;
+      const progress = this.progressFor(run, pick.itemId);
+      if (progress.done || inFlight.has(pick.itemId)) continue;
+
       const item = activity.wishlist.find((row) => row.id === pick.itemId);
-      if (!item) throw new Error(`Shortlist item ${pick.itemId} has no wishlist record.`);
-      const candidates = [pick.listing, ...(pick.alternates ?? [])];
-      if (run.attemptIndex >= this.config.PAYMENT_ATTEMPTS_PER_LISTING) {
-        run.candidateIndex += 1;
-        run.attemptIndex = 0;
+      if (!item) continue;
+
+      const listing = this.nextCandidate(activity, run, pick, item, mandate);
+      if (!listing) continue;
+
+      const attemptId = newId("attempt");
+      const grantToken = `card-grant-${crypto.randomUUID()}`;
+      const grantExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+      const attempt: PurchaseAttempt = {
+        attemptId,
+        itemId: pick.itemId,
+        candidateIndex: progress.candidateIndex,
+        attemptIndex: progress.attemptIndex,
+        cardGrantHash: hashGrant(grantToken),
+        cardGrantExpiresAt: grantExpiresAt,
+      };
+      // Recorded BEFORE dispatch. The Closer can call back the instant it accepts, and a callback
+      // for an attempt this run has never heard of is rejected as stale.
+      run.attempts[attemptId] = attempt;
+      run.updatedAt = new Date().toISOString();
+      inFlight.add(pick.itemId);
+
+      starts.push(
+        this.dispatchAttempt(activity, run, attempt, item, listing, grantToken, grantExpiresAt, settings.sandbox),
+      );
+    }
+
+    // Persisted BEFORE dispatch, and this is the only write of this snapshot.
+    //
+    // A Closer can accept a job and call back for its card while a sibling's dispatch is still
+    // outstanding. claimCard then writes that attempt's cardId and cardLast4. Writing this snapshot
+    // AGAIN after the await erased them: the card had really been minted and the merchant really
+    // charged it, but confirmOrder then refused the order for having no card — money gone, purchase
+    // reported as failed. Reproduced. Never write a run object held across an await.
+    await this.repository.putPurchaseRun(run);
+    // Concurrently: N cold browser starts one after another is the slow path this exists to avoid.
+    await Promise.allSettled(starts);
+
+    // Re-read, because the run on disk now includes whatever the callbacks wrote while we waited.
+    const fresh = await this.repository.getPurchaseRun(activityId);
+    if (fresh) await this.completeIfDone(activity, fresh);
+  }
+
+  /** The next candidate listing for an item, skipping any the mandate or the amount rules out. */
+  private nextCandidate(
+    activity: Activity,
+    run: PurchaseRun,
+    pick: Activity["shortlist"][number],
+    item: WishlistItem,
+    mandate: Mandate,
+  ): Listing | null {
+    const progress = this.progressFor(run, pick.itemId);
+    const candidates = [pick.listing, ...(pick.alternates ?? [])];
+
+    while (progress.candidateIndex < candidates.length) {
+      if (progress.attemptIndex >= this.config.PAYMENT_ATTEMPTS_PER_LISTING) {
+        progress.candidateIndex += 1;
+        progress.attemptIndex = 0;
+        continue;
       }
-      const listing = candidates[run.candidateIndex];
-      if (!listing) {
-        throw new Error(`Every compliant candidate failed for ${item.name}.`);
-      }
+      const listing = candidates[progress.candidateIndex];
+      if (!listing) break;
       if (listing.amountMinor > pick.listing.amountMinor) {
-        await this.appendSystemLog(
+        void this.appendSystemLog(
           activity,
           item,
           `skipped ${listing.title} · ${listing.price} exceeds the approved amount`,
         );
-        run.candidateIndex += 1;
-        run.attemptIndex = 0;
+        progress.candidateIndex += 1;
+        progress.attemptIndex = 0;
         continue;
       }
       try {
         this.assertListing(item, listing, mandate);
+        return listing;
       } catch (error) {
-        await this.appendSystemLog(activity, item, `skipped candidate · ${asMessage(error)}`);
-        run.candidateIndex += 1;
-        run.attemptIndex = 0;
-        continue;
-      }
-
-      const attemptId = newId("attempt");
-      const attemptKey = `${run.idempotencyKey}:${item.id}:${run.candidateIndex}:${run.attemptIndex}`;
-      const grantToken = `card-grant-${crypto.randomUUID()}`;
-      const grantExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-      try {
-        run.attemptId = attemptId;
-        run.cardGrantHash = hashGrant(grantToken);
-        run.cardGrantExpiresAt = grantExpiresAt;
-        run.updatedAt = new Date().toISOString();
-        await this.repository.putPurchaseRun(run);
-        await this.purchaseAgents.startPurchase({
-          activityId,
-          attemptId,
-          item,
-          listing,
-          cardGrant: {
-            claimUrl: `${this.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/v1/integrations/purchases/${encodeURIComponent(activityId)}/attempts/${encodeURIComponent(attemptId)}/card`,
-            token: grantToken,
-            amountMinor: listing.amountMinor,
-            currency: "SGD",
-            expiresAt: grantExpiresAt,
-          },
-          sandbox: this.cards.mode === "local" || this.purchaseAgents.mode === "local",
-          idempotencyKey: attemptKey,
-        });
-        return;
-      } catch (error) {
-        await this.expireCurrentCard(run);
-        await this.appendSystemLog(
-          activity,
-          item,
-          `could not start Closer attempt ${run.attemptIndex + 1} · ${asMessage(error)}`,
-        );
-        run.attemptIndex += 1;
-        this.clearAttempt(run);
-        await this.repository.putPurchaseRun(run);
+        void this.appendSystemLog(activity, item, `skipped candidate · ${asMessage(error)}`);
+        progress.candidateIndex += 1;
+        progress.attemptIndex = 0;
       }
     }
-    throw new Error("Purchase run reached an invalid completion state.");
+
+    // Out of candidates. The item is finished — unsuccessfully — and must not block the others.
+    progress.done = true;
+    void this.appendSystemLog(activity, item, "every compliant candidate failed");
+    return null;
+  }
+
+  private async dispatchAttempt(
+    activity: Activity,
+    run: PurchaseRun,
+    attempt: PurchaseAttempt,
+    item: WishlistItem,
+    listing: Listing,
+    grantToken: string,
+    grantExpiresAt: string,
+    sandbox: boolean,
+  ): Promise<void> {
+    const attemptKey = `${run.idempotencyKey}:${item.id}:${attempt.candidateIndex}:${attempt.attemptIndex}`;
+    try {
+      await this.purchaseAgents.startPurchase({
+        activityId: activity.id,
+        attemptId: attempt.attemptId,
+        item,
+        listing,
+        cardGrant: {
+          claimUrl: `${this.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/v1/integrations/purchases/${encodeURIComponent(activity.id)}/attempts/${encodeURIComponent(attempt.attemptId)}/card`,
+          token: grantToken,
+          amountMinor: listing.amountMinor,
+          currency: "SGD",
+          expiresAt: grantExpiresAt,
+        },
+        sandbox,
+        idempotencyKey: attemptKey,
+      });
+    } catch (error) {
+      // One item failing to start must not take the others down with it.
+      await this.expireAttemptCard(run, attempt);
+      await this.appendSystemLog(
+        activity,
+        item,
+        `could not start Closer attempt ${attempt.attemptIndex + 1} · ${asMessage(error)}`,
+      );
+      // Applied to a FRESH run, not to the caller's snapshot. Siblings' callbacks have been writing
+      // to the stored run while this dispatch was outstanding, and persisting a stale copy would
+      // throw their card claims and their completed items away.
+      const fresh = await this.repository.getPurchaseRun(activity.id);
+      if (!fresh || fresh.status !== "running") return;
+      this.progressFor(fresh, item.id).attemptIndex += 1;
+      this.clearAttempt(fresh, attempt.attemptId);
+      await this.repository.putPurchaseRun(fresh);
+    }
+  }
+
+  /** Marks the run finished once every item has either been bought or run out of candidates. */
+  private async completeIfDone(activity: Activity, run: PurchaseRun): Promise<void> {
+    if (run.status !== "running") return;
+    if (Object.keys(run.attempts).length > 0) return;
+    const unfinished = activity.shortlist.filter((pick) => !this.progressFor(run, pick.itemId).done);
+    if (unfinished.length > 0) return;
+
+    run.status = "completed";
+    run.updatedAt = new Date().toISOString();
+    const purchasedIds = new Set(
+      activity.execution.filter((row) => row.state === "purchased").map((row) => row.itemId),
+    );
+    const bought = activity.shortlist.filter((pick) => purchasedIds.has(pick.itemId));
+    const completedAt = displayTime();
+    activity.status = "completed";
+    activity.completedAt = completedAt;
+    activity.displayTs = completedAt;
+    activity.totalMinor = bought.reduce((sum, row) => sum + row.listing.amountMinor, 0);
+    activity.archiveLines = bought.map((row) => ({
+      name:
+        activity.wishlist.find((wishlistItem) => wishlistItem.id === row.itemId)?.name ?? row.itemId,
+      seller: row.listing.seller,
+      price: row.listing.price,
+    }));
+    await Promise.all([
+      this.repository.putActivity(activity, "purchase.completed"),
+      this.repository.putPurchaseRun(run),
+    ]);
+    this.events.emit(activity.id, {
+      type: "activity.completed",
+      completedAt,
+      totalMinor: activity.totalMinor,
+    });
+    this.snapshot(activity);
   }
 
   private async confirmOrder(
     activity: Activity,
     run: PurchaseRun,
+    attempt: PurchaseAttempt,
     item: WishlistItem,
     orderId: string,
     message?: string,
@@ -382,37 +550,48 @@ export class PurchaseService {
     if (persistedActivity?.status !== "live" || persistedRun?.status !== "running") {
       throw new HttpError(409, "This order confirmation arrived after cancellation.");
     }
-    const pick = activity.shortlist[run.itemIndex];
+    const pick = activity.shortlist.find((row) => row.itemId === attempt.itemId);
     if (!pick) throw new Error("Confirmed item is outside the shortlist.");
-    const listing = [pick.listing, ...(pick.alternates ?? [])][run.candidateIndex];
+    const listing = [pick.listing, ...(pick.alternates ?? [])][attempt.candidateIndex];
     if (!listing) throw new Error("Confirmed listing is outside the candidate list.");
-    if (!run.cardId || !run.cardLast4 || !run.cardClaimedAt) {
+    // The card belongs to this attempt, not to the run: with several in flight, reading a shared
+    // field here would debit the wallet against whichever attempt happened to claim last.
+    if (!attempt.cardId || !attempt.cardLast4 || !attempt.cardClaimedAt) {
       throw new HttpError(409, "Closer cannot confirm an order before claiming its card.");
     }
-    const wallet = await this.repository.getWallet(activity.userId);
-    const walletCard = wallet.cards.find(
-      (row) => row.pan.endsWith(run.cardLast4 ?? "") && row.status === "issued",
-    );
-    if (walletCard) walletCard.status = "used";
-    wallet.balanceMinor -= listing.amountMinor;
-    wallet.transactions.unshift({
-      id: newId("txn"),
-      ts: new Intl.DateTimeFormat("en-SG", {
-        timeZone: "Asia/Singapore",
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(new Date()),
-      label: `Card authorisation · ${listing.seller}`,
-      ref: `order ${orderId}`,
-      amount: `−${listing.price}`,
-      debit: true,
+    /*
+     * Debited under a per-user lock. Two order.confirmed callbacks racing here each read the same
+     * balance, each subtract their own amount, and the second write loses the first debit — the
+     * ledger then under-reports money that has genuinely left, and the inflated balance lets the
+     * next claim pass its own funds check.
+     */
+    const wallet = await withWallet(activity.userId, async () => {
+      const current = await this.repository.getWallet(activity.userId);
+      const walletCard = current.cards.find(
+        (row) => row.pan.endsWith(attempt.cardLast4 ?? "") && row.status === "issued",
+      );
+      if (walletCard) walletCard.status = "used";
+      current.balanceMinor -= listing.amountMinor;
+      current.transactions.unshift({
+        id: newId("txn"),
+        ts: new Intl.DateTimeFormat("en-SG", {
+          timeZone: "Asia/Singapore",
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date()),
+        label: `Card authorisation · ${listing.seller}`,
+        ref: `order ${orderId}`,
+        amount: `−${listing.price}`,
+        debit: true,
+      });
+      await this.repository.putWallet(activity.userId, current);
+      return current;
     });
     pick.listing = listing;
-    pick.reSearched = run.candidateIndex > 0;
-    await this.repository.putWallet(activity.userId, wallet);
+    pick.reSearched = attempt.candidateIndex > 0;
     await this.emitStep(
       activity,
       item,
@@ -422,42 +601,11 @@ export class PurchaseService {
     );
     this.events.emit(activity.id, { type: "wallet.updated", wallet });
 
-    run.itemIndex += 1;
-    run.candidateIndex = 0;
-    run.attemptIndex = 0;
-    this.clearAttempt(run);
-    run.updatedAt = new Date().toISOString();
-    if (run.itemIndex >= activity.shortlist.length) {
-      run.status = "completed";
-      const completedAt = displayTime();
-      activity.status = "completed";
-      activity.completedAt = completedAt;
-      activity.displayTs = completedAt;
-      activity.totalMinor = activity.shortlist.reduce(
-        (sum, row) => sum + row.listing.amountMinor,
-        0,
-      );
-      activity.archiveLines = activity.shortlist.map((row) => ({
-        name:
-          activity.wishlist.find((wishlistItem) => wishlistItem.id === row.itemId)?.name ??
-          row.itemId,
-        seller: row.listing.seller,
-        price: row.listing.price,
-      }));
-      await Promise.all([
-        this.repository.putActivity(activity, "purchase.completed"),
-        this.repository.putPurchaseRun(run),
-      ]);
-      this.events.emit(activity.id, {
-        type: "activity.completed",
-        completedAt,
-        totalMinor: activity.totalMinor,
-      });
-      this.snapshot(activity);
-      return;
-    }
+    this.progressFor(run, attempt.itemId).done = true;
+    this.clearAttempt(run, attempt.attemptId);
     await this.repository.putPurchaseRun(run);
-    void this.startNextAttempt(activity.id).catch((error) => this.failRun(activity.id, error));
+    // Refill the freed slot, then finish the run if that was the last item.
+    void this.startAttempts(activity.id).catch((error) => this.failRun(activity.id, error));
   }
 
   private assertMandate(activity: Activity, mandate: Mandate, wallet: Wallet): void {
@@ -501,24 +649,23 @@ export class PurchaseService {
     }
   }
 
-  private async expireCurrentCard(run: PurchaseRun): Promise<void> {
-    if (!run.cardLast4) return;
-    const wallet = await this.repository.getWallet(run.userId);
-    const card = wallet.cards.find(
-      (row) => row.pan.endsWith(run.cardLast4 ?? "") && row.status === "issued",
-    );
-    if (card) card.status = "expired";
-    await this.repository.putWallet(run.userId, wallet);
+  /** Marks this attempt's card spent-or-dead in the wallet. Never touches another attempt's. */
+  private async expireAttemptCard(run: PurchaseRun, attempt: PurchaseAttempt): Promise<void> {
+    if (!attempt.cardLast4) return;
+    const wallet = await withWallet(run.userId, async () => {
+      const current = await this.repository.getWallet(run.userId);
+      const card = current.cards.find(
+        (row) => row.pan.endsWith(attempt.cardLast4 ?? "") && row.status === "issued",
+      );
+      if (card) card.status = "expired";
+      await this.repository.putWallet(run.userId, current);
+      return current;
+    });
     this.events.emit(run.activityId, { type: "wallet.updated", wallet });
   }
 
-  private clearAttempt(run: PurchaseRun): void {
-    delete run.attemptId;
-    delete run.cardGrantHash;
-    delete run.cardGrantExpiresAt;
-    delete run.cardClaimedAt;
-    delete run.cardId;
-    delete run.cardLast4;
+  private clearAttempt(run: PurchaseRun, attemptId: string): void {
+    delete run.attempts[attemptId];
     run.updatedAt = new Date().toISOString();
   }
 
@@ -576,7 +723,11 @@ export class PurchaseService {
       this.repository.getPurchaseRun(activityId),
     ]);
     if (!activity || !run || run.status !== "running") return;
-    await this.expireCurrentCard(run);
+    // Every live attempt's card, not just one: a run that dies with five browsers open would
+    // otherwise leave four cards marked issued forever.
+    for (const attempt of Object.values(run.attempts)) {
+      await this.expireAttemptCard(run, attempt);
+    }
     run.status = "failed";
     run.updatedAt = new Date().toISOString();
     activity.status = "cancelled";

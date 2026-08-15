@@ -10,8 +10,9 @@ interface ExecutionScreenProps {
 }
 
 /**
- * Four steps per item, strictly sequential across items, with the Closer's
- * embeddable browser stream shown whenever its callback supplies one.
+ * Four steps per item, run concurrently across items — each one gets its own browser and its own
+ * single-use card — with the Closer's embeddable browser stream shown whenever its callback
+ * supplies one.
  */
 export function ExecutionScreen({ activity, onNewActivity, onViewWallet }: ExecutionScreenProps) {
   const done = activity.status === "completed";
@@ -35,7 +36,7 @@ export function ExecutionScreen({ activity, onNewActivity, onViewWallet }: Execu
           <div className={styles.headMeta}>
             {done
               ? `completed ${activity.completedAt ?? ""} · ${formatMinor(total)}`
-              : "sequential · single-use card per order"}
+              : `${count} in parallel · single-use card per order`}
           </div>
         </div>
 
