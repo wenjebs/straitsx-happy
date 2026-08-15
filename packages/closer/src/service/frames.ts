@@ -33,9 +33,26 @@ export async function attachFrames(
       maxHeight: 900,
       everyNthFrame: 1,
     })
-    .catch(() => {
-      /* A view that never paints must not fail a purchase that is otherwise fine. */
+    .catch((error: unknown) => {
+      // A view that never paints must not fail a purchase that is otherwise fine — but a silent
+      // catch here is indistinguishable from a broken merchant, so it says so.
+      console.error(
+        `live view: startScreencast failed for ${attemptId}:`,
+        error instanceof Error ? error.message : error,
+      );
     });
+
+  /*
+   * One frame immediately, because Chrome only emits on repaint.
+   *
+   * A checkout that has finished loading and is sitting still produces no screencast frames at
+   * all, so the viewer stares at an unpainted black rectangle and reads it as a hung agent. This
+   * paints the current page the moment someone attaches.
+   */
+  await page
+    .screenshot({ type: "jpeg", quality: Number(process.env.AGENTCORE_FRAME_QUALITY ?? 70) })
+    .then((shot) => view.push(attemptId, shot.toString("base64")))
+    .catch(() => {});
 
   return async () => {
     await cdp.send("Page.stopScreencast").catch(() => {});
