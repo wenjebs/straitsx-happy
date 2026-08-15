@@ -23,7 +23,8 @@ export interface LiveView {
   close(attemptId: string): void;
 }
 
-type Channel = { clients: Set<ServerResponse>; blanked: boolean };
+/** `last` is what a viewer who joins between repaints gets, instead of an unpainted rectangle. */
+type Channel = { clients: Set<ServerResponse>; blanked: boolean; last: string | null };
 
 /**
  * Attempt ids reach this file straight from the URL path of an unauthenticated route, and get
@@ -49,7 +50,7 @@ export function createLiveView(): LiveView {
   const channel = (id: string): Channel => {
     let c = channels.get(id);
     if (!c) {
-      c = { clients: new Set(), blanked: false };
+      c = { clients: new Set(), blanked: false, last: null };
       channels.set(id, c);
     }
     return c;
@@ -105,6 +106,9 @@ export function createLiveView(): LiveView {
       c.clients.add(res);
       // A viewer who joins mid-blank must see the blank, not the last frame before it.
       if (c.blanked) res.write("event: blank\ndata: card entry in progress\n\n");
+      // Chrome emits frames on repaint, so a viewer arriving at a settled page would otherwise
+      // wait for the next one — on a finished checkout that can be never.
+      else if (c.last) res.write(`event: frame\ndata: ${c.last}\n\n`);
       /*
        * A comment line every ten seconds, which EventSource ignores.
        *
@@ -121,12 +125,17 @@ export function createLiveView(): LiveView {
     },
 
     push(attemptId, jpegBase64) {
-      if (channel(attemptId).blanked) return;
+      const c = channel(attemptId);
+      if (c.blanked) return;
+      c.last = jpegBase64;
       emit(attemptId, `event: frame\ndata: ${jpegBase64}\n\n`);
     },
 
     blank(attemptId, reason) {
-      channel(attemptId).blanked = true;
+      const c = channel(attemptId);
+      c.blanked = true;
+      // Dropped, not kept: a replay after card entry would hand a late viewer the card screen.
+      c.last = null;
       emit(attemptId, `event: blank\ndata: ${reason}\n\n`);
     },
 

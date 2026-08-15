@@ -43,18 +43,24 @@ export async function attachFrames(
     });
 
   /*
-   * One frame immediately, because Chrome only emits on repaint.
+   * A screenshot every two seconds, on top of the screencast.
    *
-   * A checkout that has finished loading and is sitting still produces no screencast frames at
-   * all, so the viewer stares at an unpainted black rectangle and reads it as a hung agent. This
-   * paints the current page the moment someone attaches.
+   * Screencast frames only exist when Chrome repaints, and a checkout that has finished loading
+   * repaints rarely or never — which showed up as a permanently black tile even though the run
+   * was healthy. The screencast still carries the smooth updates; this guarantees the picture is
+   * never older than one tick. `view.push` drops these while the view is blanked, so the
+   * card-entry window stays dark.
    */
-  await page
-    .screenshot({ type: "jpeg", quality: Number(process.env.AGENTCORE_FRAME_QUALITY ?? 70) })
-    .then((shot) => view.push(attemptId, shot.toString("base64")))
-    .catch(() => {});
+  const quality = Number(process.env.AGENTCORE_FRAME_QUALITY ?? 70);
+  const paint = async () => {
+    const shot = await page.screenshot({ type: "jpeg", quality, timeout: 5_000 }).catch(() => null);
+    if (shot) view.push(attemptId, shot.toString("base64"));
+  };
+  await paint();
+  const ticker = setInterval(() => void paint(), 2_000);
 
   return async () => {
+    clearInterval(ticker);
     await cdp.send("Page.stopScreencast").catch(() => {});
     await cdp.detach().catch(() => {});
   };
