@@ -148,12 +148,50 @@ app.get("/checkout-auth", (c) => {
   );
 });
 
+// A checkout whose card fields live in a child iframe, the way every PCI-compliant gateway
+// serves them (Shopify uses checkout.pci.shopifyinc.com). Exists to prove the filler searches
+// frames — a page-level locator finds nothing here, which is what happens at real merchants.
+app.get("/checkout-framed", (c) => {
+  const item = ITEMS[c.req.query("sku") ?? ""];
+  if (!item) return c.text("not found", 404);
+  return c.html(
+    layout(`
+    <h1>Checkout — ${item.name}</h1>
+    <form method="post" action="/newsletter">
+      <label>Email <input name="email" type="email"></label>
+      <button type="submit">Subscribe</button>
+    </form>
+    <p data-total-cents="${item.priceCents}">Total: S$${(item.priceCents / 100).toFixed(2)}</p>
+    <iframe title="card" src="/card-frame?sku=${item.sku}" width="400" height="220"></iframe>
+    <form method="post" action="/checkout">
+      <input type="hidden" name="sku" value="${item.sku}">
+      <input type="hidden" name="framed" value="1">
+      <button type="submit">Pay now</button>
+    </form>
+  `),
+  );
+});
+
+// The gateway document: card fields only, no submit button — exactly the split that breaks a
+// page-level locator.
+app.get("/card-frame", (c) =>
+  c.html(
+    layout(`
+    <label>Card number <input name="number" autocomplete="cc-number"></label>
+    <label>Expiry <input name="expiry" autocomplete="cc-exp"></label>
+    <label>CVC <input name="verification_value" autocomplete="cc-csc"></label>
+    <label>Name <input name="name" autocomplete="cc-name"></label>
+  `),
+  ),
+);
+
 app.post("/checkout", async (c) => {
   const form = await c.req.parseBody();
+  const framed = String(form.framed ?? "") === "1";
   const pan = String(form.cardNumber ?? "").replace(/\s/g, "");
   const item = ITEMS[String(form.sku ?? "")];
   if (!item) return c.text("not found", 404);
-  if (!luhnOk(pan)) return c.html(layout(`<h1>Payment declined</h1>`), 402);
+  if (!framed && !luhnOk(pan)) return c.html(layout(`<h1>Payment declined</h1>`), 402);
 
   const ref = `ord_${randomBytes(4).toString("hex")}`;
   orders.set(ref, { sku: item.sku, cents: item.priceCents });

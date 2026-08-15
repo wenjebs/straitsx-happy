@@ -42,29 +42,62 @@ const SELECTORS = {
   name: ['input[autocomplete="cc-name"]', 'input[name*="cardholder" i]', 'input[name="name"]'],
 };
 
-/** Returns the selector that matched, so the caller can scope later queries to the same form. */
-async function fillFirst(page: Page, candidates: string[], value: string): Promise<string | null> {
+type FieldHit = { selector: string; sameDocument: boolean };
+
+/**
+ * Fills the first matching field, searching the page and then every child frame.
+ *
+ * PCI DSS 4.0 pushes serious gateways to render the card number inside an iframe they control —
+ * Shopify serves it from checkout.pci.shopifyinc.com — and Playwright's page-level locators do
+ * not cross frame boundaries. Searching the page alone returns FIELDS_NOT_FOUND at essentially
+ * every real merchant, so no purchase can ever happen. Verified live against a Shopify checkout:
+ * the fields carry exactly our autocomplete selectors, one document down.
+ *
+ * Reports whether the hit was in the main document, because that decides whether the submit
+ * button can be scoped to the same form (see submitLocator).
+ */
+async function fillFirst(
+  page: Page,
+  candidates: string[],
+  value: string,
+): Promise<FieldHit | null> {
+  const children = page.frames().filter((f) => f !== page.mainFrame());
   for (const sel of candidates) {
-    const el = page.locator(sel).first();
-    if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
-      await el.fill(value);
-      return sel;
+    for (const [i, scope] of [page, ...children].entries()) {
+      const el = scope.locator(sel).first();
+      if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
+        await el.fill(value);
+        return { selector: sel, sameDocument: i === 0 };
+      }
     }
   }
   return null;
 }
 
 /**
- * Prefers the submit control inside the form holding the card number. A real checkout page
- * routinely carries other forms — newsletter signup, coupon codes, search — and clicking the
- * page's first submit button can fire one of those instead of paying.
+ * Finds the control that actually pays. A real checkout carries other forms — newsletter,
+ * coupon, search — and clicking the page's first submit button can fire one of those instead.
+ *
+ * When the card field is in the main document we scope to its own form, which is exact. When it
+ * is inside a gateway iframe the pay button lives in a different document, so that scoping
+ * cannot match; we fall back to matching the button by its accessible name, which is what a
+ * person reads to find it, and only then to the first submit on the page.
  */
-async function submitLocator(page: Page, numberSelector: string, override?: string) {
+async function submitLocator(page: Page, hit: FieldHit, override?: string) {
   if (override) return page.locator(override).first();
-  const scoped = page.locator(
-    `form:has(${numberSelector}) button[type="submit"], form:has(${numberSelector}) input[type="submit"]`,
-  );
-  if ((await scoped.count()) > 0) return scoped.first();
+
+  if (hit.sameDocument) {
+    const scoped = page.locator(
+      `form:has(${hit.selector}) button[type="submit"], form:has(${hit.selector}) input[type="submit"]`,
+    );
+    if ((await scoped.count()) > 0) return scoped.first();
+  }
+
+  const byName = page
+    .getByRole("button", { name: /pay now|place order|complete order|^pay\b|confirm order/i })
+    .first();
+  if ((await byName.count()) > 0) return byName;
+
   return page.locator('button[type="submit"], input[type="submit"]').first();
 }
 
@@ -87,8 +120,8 @@ export async function payWithCard(
     return { ok: false, error: "CARD_UNREADABLE" };
   }
 
-  const numberSelector = await fillFirst(page, SELECTORS.number, material.pan);
-  if (!numberSelector) return { ok: false, error: "FIELDS_NOT_FOUND" };
+  const numberHit = await fillFirst(page, SELECTORS.number, material.pan);
+  if (!numberHit) return { ok: false, error: "FIELDS_NOT_FOUND" };
   await fillFirst(page, SELECTORS.expiry, material.expiry);
   await fillFirst(page, SELECTORS.cvc, material.cvc);
   await fillFirst(page, SELECTORS.name, "Happy Agent");
@@ -98,7 +131,7 @@ export async function payWithCard(
     // waitForLoadState inspects the CURRENT page, which is already loaded, so racing it against
     // the click resolves instantly and we would read the pre-submit DOM. Wait for the navigation
     // the submit causes instead.
-    const submit = await submitLocator(page, numberSelector, opts.submitSelector);
+    const submit = await submitLocator(page, numberHit, opts.submitSelector);
     await Promise.all([
       page.waitForNavigation({ waitUntil: "load", timeout: 20_000 }),
       submit.click(),

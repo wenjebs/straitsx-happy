@@ -146,3 +146,18 @@ describe("decline beats a loose confirm()", () => {
     await page.close();
   }, 60_000);
 });
+
+describe("card fields inside a gateway iframe (every real PCI checkout)", () => {
+  it("finds and fills them one frame down, where a page-level locator finds nothing", async () => {
+    const page = await browser.newPage();
+    await page.goto("http://127.0.0.1:4031/checkout-framed?sku=usb-c-hub");
+
+    // this is the exact condition that made every real merchant unreachable
+    expect(await page.locator('input[autocomplete="cc-number"]').count()).toBe(0);
+
+    const r = await payWithCard({ db, issuer }, page, purchaseId);
+    expect(r.ok).toBe(true);
+    expect(r.orderRef).toMatch(/^ord_/); // paid, rather than subscribing to the newsletter
+    await page.close();
+  }, 60_000);
+});
