@@ -22,7 +22,7 @@ if (!url) {
 const store = createProfileStore();
 const host = new URL(url).hostname;
 const connected = store.status(host).connected;
-console.log(`session for ${host}: ${connected ? "connected" : "none — run `login` first"}`);
+console.log(`session for ${host}: ${connected ? "connected" : "none — run `connect` first"}`);
 
 const CARD = 'input[autocomplete="cc-number"], input[name*="card" i][name*="num" i]';
 const BUY = /buy now|add to cart|checkout|proceed to (pay|checkout)|continue to payment/i;
