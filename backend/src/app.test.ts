@@ -179,6 +179,7 @@ function harness(auth: AuthService = new TestAuth()) {
       walletAuth,
       auth,
       frames: new FrameHub(),
+      streamSecret: "test-stream-secret",
     }),
   };
 }

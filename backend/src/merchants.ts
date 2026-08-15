@@ -7,6 +7,16 @@
  * human from a residential connection. packages/closer/demo/links.ts holds the reachability
  * targets the second group came from.
  *
+ * That difference is not bookkeeping. Measured 15 Aug: `nylon.coffee/search/suggest.json?q=coffee`
+ * returned five products to a laptop and zero to the AgentCore browser in the same minute, after a
+ * run of repeated probing. The shop is not down — it is answering an AWS IP differently, which is
+ * the datacentre-egress wall docs/agentcore-browser.md predicts and cannot fix. Earlier runs did
+ * get products from it, so this reads as throttling that hardens under load rather than a block.
+ *
+ * Two consequences. Prefer the AWS-verified six, which is why they are ordered first. And do not
+ * rehearse the demo against these shops back to back — the search degrades exactly when it is
+ * being practised most.
+ *
  * Everything here is Shopify. That is not a coincidence: a Shopify storefront exposes a stable
  * `/search` and a per-product `.js` document, so a scout can read an exact price in cents rather
  * than parsing a rendered string. Marketplaces (Shopee, Lazada, Amazon.sg, FairPrice, COURTS) are

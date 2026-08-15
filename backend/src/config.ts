@@ -39,6 +39,11 @@ const Env = z
     /** One AgentCore session per concurrent scout, so this is the real cost dial. */
     AGENTCORE_MAX_SESSIONS: z.coerce.number().int().min(1).max(12).default(4),
     AGENTCORE_JPEG_QUALITY: z.coerce.number().int().min(20).max(95).default(60),
+    /**
+     * Signs the scout livestream's capability URLs. Defaults to a per-boot random value, which is
+     * correct for one task; set it when several instances serve the same activity.
+     */
+    STREAM_TOKEN_SECRET: optionalString,
     SCOUT_SLOTS_PER_ITEM: z.coerce.number().int().min(1).max(4).default(2),
     SCOUT_MAX_TOOL_CALLS: z.coerce.number().int().min(2).max(24).default(10),
     OPENAI_API_KEY: optionalString,

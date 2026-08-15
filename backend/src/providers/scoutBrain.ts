@@ -88,11 +88,15 @@ export class ScriptedScoutBrain implements ScoutBrain {
     const found: { merchantId: string; candidate: Candidate }[] = [];
     for (const merchant of merchants) {
       if (signal.aborted) return null;
-      const candidates = await tools.searchStore(merchant.id, item.name).catch(() => []);
-      for (const candidate of candidates) {
-        if (candidate.priceMinor === 0 || candidate.priceMinor <= budget.maxMinor) {
-          found.push({ merchantId: merchant.id, candidate });
+      for (const query of queriesFor(item, merchant.sells)) {
+        const candidates = await tools.searchStore(merchant.id, query).catch(() => []);
+        if (candidates.length === 0) continue;
+        for (const candidate of candidates) {
+          if (candidate.priceMinor === 0 || candidate.priceMinor <= budget.maxMinor) {
+            found.push({ merchantId: merchant.id, candidate });
+          }
         }
+        break;
       }
     }
 
@@ -350,6 +354,31 @@ interface ToolCall {
 
 function key(merchantId: string, handle: string): string {
   return `${merchantId}::${handle}`;
+}
+
+/**
+ * What to type into a shop's search box, most specific first.
+ *
+ * Shopify's predictive search requires EVERY term to match, so the shopper's own phrasing is often
+ * too long: a roaster that sells a "Filter Coffee Subscription" returns nothing for "filter coffee
+ * beans", because it never says "beans". Searching a real shop for the exact wishlist wording and
+ * concluding it stocks nothing is how a coffee search ends up shortlisting a showerhead filter.
+ *
+ * The second attempt is the word the request and the shop's own description have in common —
+ * "coffee" for a roaster, "notebook" for a stationery shop. That is the term most likely to be on
+ * the product, and it comes from data already in hand rather than another model call.
+ *
+ * Two attempts at most. Each one is a page load on someone else's shop.
+ */
+function queriesFor(item: ScoutItem, merchantSells: string): string[] {
+  const queries = [item.name];
+  const stock = words(merchantSells);
+  const shared = [...words(item.name)].find((word) => stock.has(word));
+  const narrowed = shared ?? [...words(item.name)].pop();
+  if (narrowed && narrowed.toLowerCase() !== item.name.trim().toLowerCase()) {
+    queries.push(narrowed);
+  }
+  return queries;
 }
 
 function words(text: string): Set<string> {

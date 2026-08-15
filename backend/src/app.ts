@@ -13,6 +13,7 @@ import type { CardProvider } from "./providers/card.js";
 import type { PurchaseAgentProvider } from "./providers/purchaseAgent.js";
 import type { Repository } from "./repository.js";
 import type { FrameHub } from "./streams.js";
+import { verifyStreamToken } from "./streamTokens.js";
 import {
   AddWishlistItemBody,
   AgentCallbackEvent,
@@ -51,6 +52,8 @@ export interface AppDependencies {
   auth: AuthService;
   /** Live JPEG frames from the scouts' AgentCore browsers. */
   frames: FrameHub;
+  /** Verifies the signed livestream URLs the scouts mint. */
+  streamSecret: string;
 }
 
 type AppBindings = { Variables: { user: AuthUser } };
@@ -127,9 +130,8 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     if (
       c.req.path.startsWith("/v1/integrations/") ||
       c.req.path.startsWith("/v1/dev/") ||
-      // The scout livestream is loaded by an <img>, which cannot carry an Authorization header.
-      // It streams pixels of a public storefront and never of a card form — the Closer's browser
-      // is a different session and is not streamed here.
+      // The scout livestream is loaded by an <img>, which cannot carry an Authorization header, so
+      // it authenticates on its own with a signed, expiring token in the URL — see the route.
       c.req.path.startsWith("/v1/streams/")
     ) {
       await next();
@@ -288,6 +290,14 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
    */
   app.get("/v1/streams/agents/:id", (c) => {
     const agentId = c.req.param("id");
+    /*
+     * The URL is the credential. Agent ids are `scout-<itemId>-<slot>` and item ids are slugged
+     * product names, so without this anyone could guess another user's stream and watch their
+     * browser. The token is signed over the agent id and expires with the browser session.
+     */
+    if (!verifyStreamToken(deps.streamSecret, agentId, c.req.query("t"))) {
+      throw new HttpError(403, "Stream link is missing, expired or invalid.");
+    }
     c.header("Content-Type", `multipart/x-mixed-replace; boundary=${MJPEG_BOUNDARY}`);
     c.header("Cache-Control", "no-cache, no-store, no-transform");
     c.header("X-Accel-Buffering", "no");

@@ -4,6 +4,7 @@ import type { ScoutProvider } from "./agent.js";
 import type { AgentCoreBrowser, BrowserSession } from "./agentcoreBrowser.js";
 import { catalogueFallback } from "./fallbackShortlist.js";
 import { relevance, type ScoutBrain, type ScoutDecision, type ScoutPick } from "./scoutBrain.js";
+import { mintStreamToken } from "../streamTokens.js";
 import { openProduct, searchStore } from "./storefront.js";
 
 /**
@@ -25,6 +26,9 @@ export interface AgentCoreScoutOptions {
   publicBaseUrl: string;
   slotsPerItem: number;
   maxConcurrentSessions: number;
+  /** Signs the livestream capability URLs handed to the UI. */
+  streamSecret: string;
+  streamTokenTtlSeconds: number;
   /** Card bounds. A shortlist entry outside them cannot be paid for, so scouts never return one. */
   paymentMinMinor: number;
   paymentMaxMinor: number;
@@ -233,7 +237,18 @@ export class AgentCoreScoutProvider implements ScoutProvider {
             await this.waitIfPaused(activity.id, signal);
             const merchant = resolve(merchantId);
             await emit(1, `searching ${merchant.host} for "${query}"`, `${merchant.host}/search`);
-            return searchStore(page, merchant, query);
+            const results = await searchStore(page, merchant, query);
+            if (results.length === 0) {
+              // A shop that returns nothing looks identical to a shop that is challenging us or has
+              // changed its search markup, and the shortlist quietly falls back either way. Say
+              // which shop went quiet so the difference is diagnosable.
+              console.warn(
+                `scout ${id}: ${merchant.host} returned no products for "${query}"${
+                  merchant.probeSparingly ? " (known to challenge repeated probing)" : ""
+                }`,
+              );
+            }
+            return results;
           },
           openProduct: async (merchantId, handle) => {
             await this.waitIfPaused(activity.id, signal);
@@ -298,7 +313,12 @@ export class AgentCoreScoutProvider implements ScoutProvider {
   }
 
   private streamUrl(agent: string): string {
-    return `${this.options.publicBaseUrl.replace(/\/$/, "")}/v1/streams/agents/${encodeURIComponent(agent)}`;
+    const token = mintStreamToken(
+      this.options.streamSecret,
+      agent,
+      this.options.streamTokenTtlSeconds,
+    );
+    return `${this.options.publicBaseUrl.replace(/\/$/, "")}/v1/streams/agents/${encodeURIComponent(agent)}?t=${token}`;
   }
 
   private async post(activityId: string, body: unknown): Promise<void> {

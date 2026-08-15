@@ -45,11 +45,13 @@ import { PurchaseService } from "./services/purchases.js";
 import { WalletAuthService } from "./services/walletAuth.js";
 import { WalletFundingService } from "./services/walletFunding.js";
 import { FrameHub } from "./streams.js";
+import { defaultStreamSecret } from "./streamTokens.js";
 
 const config = loadConfig();
 const repository: Repository = createRepository();
 const events = new EventHub();
 const frames = new FrameHub();
+const streamSecret = config.STREAM_TOKEN_SECRET ?? defaultStreamSecret();
 const localPlanner = new LocalPlannerProvider({
   callbackBaseUrl: config.PUBLIC_BASE_URL,
   ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
@@ -144,6 +146,7 @@ const app = createApp({
   walletAuth,
   auth,
   frames,
+  streamSecret,
 });
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, ({ port }) => {
@@ -182,6 +185,9 @@ function createAgentCoreScouts(): ScoutProvider {
     ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
     slotsPerItem: config.SCOUT_SLOTS_PER_ITEM,
     maxConcurrentSessions: config.AGENTCORE_MAX_SESSIONS,
+    streamSecret,
+    // Outlive the browser session the stream belongs to, with slack for a late viewer.
+    streamTokenTtlSeconds: config.AGENTCORE_SESSION_TIMEOUT_SECONDS + 300,
     paymentMinMinor: config.PAYMENT_MIN_MINOR,
     paymentMaxMinor: config.PAYMENT_MAX_MINOR,
   });
