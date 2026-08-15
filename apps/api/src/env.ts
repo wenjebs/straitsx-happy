@@ -29,7 +29,6 @@ const Env = z.object({
   CARD_MCP_URL: z.url(),
 
   ISSUER: z.enum(["mock", "straitsx"]).default("mock"),
-  MOCK_ISSUER_URL: z.url().default("http://127.0.0.1:4020"),
   DEMO_STORE_URL: z.url().default("http://127.0.0.1:4030"),
 
   SPEND_KEY_MODE: z.enum(["kms", "local"]).default("local"),

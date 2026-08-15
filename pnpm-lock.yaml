@@ -107,34 +107,6 @@ importers:
         specifier: ^4
         version: 4.1.10(@types/node@22.20.1)(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.11))
 
-  apps/mock-issuer:
-    dependencies:
-      '@happy/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@hono/node-server':
-        specifier: ^2
-        version: 2.1.0(hono@4.13.1)
-      hono:
-        specifier: ^4
-        version: 4.13.1
-      zod:
-        specifier: ^4
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      tsx:
-        specifier: ^4
-        version: 4.23.11
-      typescript:
-        specifier: ^5.9
-        version: 5.9.3
-      vitest:
-        specifier: ^4
-        version: 4.1.10(@types/node@22.20.1)(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.11))
-
   apps/web:
     dependencies:
       '@happy/shared':

@@ -1,4 +1,4 @@
-/** Constants that must match across api, web, mock-issuer and demo-store. */
+/** Constants that must match across api, web and demo-store. */
 
 export const FUJI_CHAIN_ID = 43113;
 export const AVALANCHE_CHAIN_ID = 43114;

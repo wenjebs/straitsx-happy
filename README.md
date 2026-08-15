@@ -20,13 +20,12 @@ pnpm dev
 
 Requires Node >= 22 and pnpm 11.
 
-That starts four processes:
+That starts three processes:
 
 | | port | |
 |---|---|---|
 | `@happy/api` | 8787 | mandates, `decide()`, ledger, card issuance |
 | `@happy/web` | 5173 | mandate builder, balance, activity feed |
-| `@happy/mock-issuer` | 4020 | local card issuer, real Luhn PANs |
 | `@happy/demo-store` | 4030 | storefront the agent checks out against |
 
 Check it came up:
@@ -42,7 +41,7 @@ curl localhost:8787/v1/health
 
 | | |
 |---|---|
-| `pnpm dev` | all four apps |
+| `pnpm dev` | all three apps |
 | `pnpm dev:api` / `pnpm dev:web` | one app |
 | `pnpm test` | vitest, all packages |
 | `pnpm typecheck` | tsc across the workspace |
@@ -54,15 +53,21 @@ curl localhost:8787/v1/health
 apps/
   api/            :8787  hono + zod + better-sqlite3 + viem
   web/            :5173  vite + react + wagmi
-  mock-issuer/    :4020  hono
   demo-store/     :4030  hono
 packages/
+  pay/                   mandates, decide(), ledger, x402 client, issuer adapter
   shared/                wire schemas, chain constants, money units
 aa-probe/                ERC-4337 spikes, verified on Fuji
 ```
 
-Apps deploy independently. `packages/shared` exists so the API and the web app
-can't disagree about the wire format.
+`packages/pay` holds the payment logic and is consumed in-process — both sides
+are TypeScript in one repo, so HTTP between them would buy nothing. `apps/api`
+is a thin wrapper over the same functions, for the browser's benefit. The mock
+issuer lives behind an `IssuerAdapter` inside `packages/pay` rather than as its
+own service, swapped by the `ISSUER` env var.
+
+`packages/shared` exists so the API and the web app can't disagree about the
+wire format.
 
 ## Configuration
 
