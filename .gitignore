@@ -25,5 +25,11 @@ plain-doc.html
 
 .DS_Store
 *.log
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*-secrets.json
 .vscode/
 .idea/

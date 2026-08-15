@@ -1,0 +1,169 @@
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  type DynamoDBClientConfig,
+} from "@aws-sdk/client-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
+import type { Activity, Mandate, Profile, Settings, Wallet } from "../domain.js";
+import type { PurchaseClaim, Repository } from "../repository.js";
+
+interface Stored<T> {
+  pk: string;
+  sk: string;
+  entity: string;
+  data: T;
+  gsi1pk?: string;
+  gsi1sk?: string;
+}
+
+export interface DynamoRepositoryOptions {
+  tableName: string;
+  region: string;
+  endpoint?: string;
+}
+
+export class DynamoRepository implements Repository {
+  private readonly document: DynamoDBDocumentClient;
+
+  constructor(
+    private readonly options: DynamoRepositoryOptions,
+    client?: DynamoDBClient,
+  ) {
+    const config: DynamoDBClientConfig = {
+      region: options.region,
+      ...(options.endpoint ? { endpoint: options.endpoint } : {}),
+    };
+    this.document = DynamoDBDocumentClient.from(client ?? new DynamoDBClient(config), {
+      marshallOptions: { removeUndefinedValues: true },
+    });
+  }
+
+  async listActivities(userId: string): Promise<Activity[]> {
+    const result = await this.document.send(
+      new QueryCommand({
+        TableName: this.options.tableName,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `USER#${userId}` },
+        ScanIndexForward: false,
+      }),
+    );
+    return (result.Items ?? []).map((item) => (item as Stored<Activity>).data);
+  }
+
+  async getActivity(id: string): Promise<Activity | null> {
+    const item = await this.get<Stored<Activity>>(`ACTIVITY#${id}`, "META");
+    return item?.data ?? null;
+  }
+
+  async putActivity(activity: Activity): Promise<void> {
+    await this.put<Stored<Activity>>({
+      pk: `ACTIVITY#${activity.id}`,
+      sk: "META",
+      entity: "activity",
+      data: activity,
+      gsi1pk: `USER#${activity.userId}`,
+      gsi1sk: `${activity.createdAt}#${activity.id}`,
+    });
+  }
+
+  async getWallet(userId: string): Promise<Wallet> {
+    return this.getState(userId, "WALLET", defaultWallet);
+  }
+
+  async putWallet(userId: string, wallet: Wallet): Promise<void> {
+    await this.putState(userId, "WALLET", wallet);
+  }
+
+  async getMandate(userId: string): Promise<Mandate> {
+    return this.getState(userId, "MANDATE", defaultMandate);
+  }
+
+  async putMandate(userId: string, mandate: Mandate): Promise<void> {
+    await this.putState(userId, "MANDATE", mandate);
+  }
+
+  async getSettings(userId: string): Promise<Settings> {
+    return this.getState(userId, "SETTINGS", defaultSettings);
+  }
+
+  async putSettings(userId: string, settings: Settings): Promise<void> {
+    await this.putState(userId, "SETTINGS", settings);
+  }
+
+  async getProfile(userId: string): Promise<Profile> {
+    return this.getState(userId, "PROFILE", defaultProfile);
+  }
+
+  async claimPurchase(activityId: string, idempotencyKey: string): Promise<PurchaseClaim> {
+    const item = {
+      pk: `PURCHASE#${activityId}`,
+      sk: "LOCK",
+      entity: "purchase-lock",
+      key: idempotencyKey,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await this.document.send(
+        new PutCommand({
+          TableName: this.options.tableName,
+          Item: item,
+          ConditionExpression: "attribute_not_exists(pk)",
+        }),
+      );
+      return { claimed: true, key: idempotencyKey };
+    } catch (error) {
+      if (!(error instanceof ConditionalCheckFailedException)) throw error;
+      const existing = await this.get<{ key: string }>(item.pk, item.sk);
+      return { claimed: false, key: existing?.key ?? "unknown" };
+    }
+  }
+
+  async getPurchaseClaim(activityId: string): Promise<PurchaseClaim | null> {
+    const existing = await this.get<{ key: string }>(`PURCHASE#${activityId}`, "LOCK");
+    return existing ? { claimed: false, key: existing.key } : null;
+  }
+
+  private async getState<T>(userId: string, key: string, fallback: () => T): Promise<T> {
+    const stored = await this.get<Stored<T>>(`USER#${userId}`, key);
+    if (stored) return stored.data;
+    const value = fallback();
+    await this.putState(userId, key, value);
+    return value;
+  }
+
+  private async putState<T>(userId: string, key: string, data: T): Promise<void> {
+    await this.put<Stored<T>>({
+      pk: `USER#${userId}`,
+      sk: key,
+      entity: key.toLowerCase(),
+      data,
+    });
+  }
+
+  private async get<T>(pk: string, sk: string): Promise<T | null> {
+    const result = await this.document.send(
+      new GetCommand({
+        TableName: this.options.tableName,
+        Key: { pk, sk },
+        ConsistentRead: true,
+      }),
+    );
+    return (result.Item as T | undefined) ?? null;
+  }
+
+  private async put<T extends object>(item: T): Promise<void> {
+    await this.document.send(
+      new PutCommand({
+        TableName: this.options.tableName,
+        Item: item as Record<string, unknown>,
+      }),
+    );
+  }
+}

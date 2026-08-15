@@ -131,7 +131,8 @@ Every activity endpoint returns this. Optional fields may be omitted.
   "agents": [
     { "agentId": "ag-1004", "itemId": "gpu", "slot": 0,
       "url": "bizgram.com.sg/rtx-4060", "stage": 2,
-      "action": "pulling seller history", "queued": false }
+      "action": "pulling seller history", "queued": false,
+      "liveStreamUrl": "https://agents.example/streams/ag-1004" }
   ],
   "searchPlaying": true,
   "searchStartedAt": "2026-08-15T14:33:10Z",
@@ -170,6 +171,7 @@ Every activity endpoint returns this. Optional fields may be omitted.
 | `itemProgress[].queued` | `true` before an item's agents are dispatched. Renders a hollow dashed dot and dims its tiles. |
 | `agents[].slot` | `0` is the lead agent, `1` trails one stage behind. Send exactly two per item — the screen is built around twelve tiles for six items. |
 | `agents[].action` | Free text, shown verbatim under the tile. Suggested: `crawling listing pages`, `reading spec table`, `pulling seller history`, `diffing 6 candidates`, `locked candidate`, `waiting for a slot`. |
+| `agents[].liveStreamUrl` | Optional embeddable URL for the Scout's live browser viewport. The frontend renders it in a sandboxed iframe. Until supplied, the tile says it is waiting for the stream; there is no simulated page animation. The stream server must permit framing via its CSP / `X-Frame-Options` policy. |
 | `execution[].step` | `0` queued, `1-3` in flight, `4` purchased. Drives a progress fill at `step/4`. |
 | `messages[].card` | Which in-chat card renders under the text. `thinking` \| `wishlist` \| `curator` \| `locked`. Omit for plain text. |
 | `imageUrl` | Optional on listings and curator options. When present the frontend renders it in place of the striped placeholder, same box size and radius. |

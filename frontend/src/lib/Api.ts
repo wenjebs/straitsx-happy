@@ -108,6 +108,8 @@ export interface AgentState {
   stage: StageIndex;
   action: string;
   queued: boolean;
+  /** Embeddable live browser stream supplied by the remote Scout service. */
+  liveStreamUrl?: string;
 }
 
 export interface ExecutionRow {

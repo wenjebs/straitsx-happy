@@ -106,11 +106,9 @@ export function SearchScreen({ activity, elapsed, onTogglePlay }: SearchScreenPr
       </div>
 
       <div className={styles.tiles}>
-        {activity.agents.map((agent, index) => {
+        {activity.agents.map((agent) => {
           const item = items.find((w) => w.id === agent.itemId);
-          return item ? (
-            <AgentTile key={agent.agentId} agent={agent} item={item} index={index} />
-          ) : null;
+          return item ? <AgentTile key={agent.agentId} agent={agent} item={item} /> : null;
         })}
       </div>
     </div>
@@ -155,18 +153,8 @@ function Lane({ item, progress }: { item: WishlistItem; progress: ItemProgress |
   );
 }
 
-function AgentTile({
-  agent,
-  item,
-  index,
-}: {
-  agent: AgentState;
-  item: WishlistItem;
-  index: number;
-}) {
+function AgentTile({ agent, item }: { agent: AgentState; item: WishlistItem }) {
   const itemHue = hue(item.hueIndex);
-  /* Every third tile mocks a result grid; the rest mock a scrolling page. */
-  const isGrid = index % 3 === 2;
 
   return (
     <div
@@ -179,42 +167,18 @@ function AgentTile({
           <span className={styles.url}>{agent.url}</span>
         </div>
 
-        {isGrid ? (
-          <div className={styles.grid}>
-            {Array.from({ length: 9 }, (_, c) => (
-              <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: fixed decorative grid
-                key={c}
-                className={styles.cell}
-                style={{
-                  background: c % 4 === 0 ? "#e4e4e8" : "#f1f1f3",
-                  animation: `h-shimmer ${2 + (c % 3) * 0.4}s ease-in-out infinite`,
-                  animationDelay: `${c * 0.12}s`,
-                }}
-              />
-            ))}
-          </div>
+        {agent.liveStreamUrl ? (
+          <iframe
+            className={styles.liveFrame}
+            src={agent.liveStreamUrl}
+            title={`Live browser stream for ${agent.agentId}`}
+            sandbox="allow-scripts allow-same-origin"
+            allow="autoplay; fullscreen"
+            referrerPolicy="no-referrer"
+          />
         ) : (
-          <div
-            className={styles.scroller}
-            style={{ animation: `h-scroll ${7 + (index % 3)}s linear infinite` }}
-          >
-            {Array.from({ length: 18 }, (_, r) => (
-              <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: fixed decorative bars
-                key={r}
-                className={styles.scrollBar}
-                style={{
-                  height: r % 5 === 0 ? 7 : 4,
-                  width: `${48 + ((r * 37) % 52)}%`,
-                  background: r % 5 === 0 ? "#dcdce0" : "#eeeef0",
-                }}
-              />
-            ))}
-          </div>
+          <div className={styles.streamWaiting}>waiting for live browser stream…</div>
         )}
-
-        <div className={styles.fade} />
       </div>
 
       <div className={styles.tileFoot}>

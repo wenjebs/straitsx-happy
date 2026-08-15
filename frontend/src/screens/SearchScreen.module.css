@@ -253,36 +253,23 @@
   text-overflow: ellipsis;
 }
 
-.scroller {
-  padding: 7px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+.liveFrame {
+  display: block;
+  width: 100%;
+  height: calc(100% - 27px);
+  border: 0;
+  background: #f5f5f6;
 }
 
-.scrollBar {
-  border-radius: 2px;
-  flex: none;
-}
-
-.grid {
-  padding: 8px;
+.streamWaiting {
+  height: calc(100% - 27px);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.cell {
-  height: 26px;
-  border-radius: 3px;
-}
-
-/* Content fades out at the bottom rather than cutting off. */
-.fade {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 55%, rgba(255, 255, 255, 0.92) 100%);
+  place-items: center;
+  padding: 12px;
+  color: var(--text-quaternary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-align: center;
 }
 
 .tileFoot {
