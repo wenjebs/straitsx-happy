@@ -1,0 +1,24 @@
+{
+  "name": "@happy/closer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@happy/pay": "workspace:*",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@happy/demo-store": "workspace:*",
+    "@hono/node-server": "^1.13.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.0"
+  }
+}
