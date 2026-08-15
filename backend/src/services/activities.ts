@@ -246,7 +246,12 @@ export class ActivityService {
         activity.title = event.title;
         activity.wishlist = event.wishlist.map((item, index) => ({ ...item, hueIndex: index % 6 }));
         activity.wishlistEstimate = event.wishlistEstimate;
-        activity.clarifications = event.clarifications;
+        const clarificationItems = new Set<string>();
+        activity.clarifications = event.clarifications.filter((row) => {
+          if (clarificationItems.has(row.itemId)) return false;
+          clarificationItems.add(row.itemId);
+          return true;
+        });
         const userMessage = activity.messages.find((message) => message.role === "user");
         activity.messages = [
           ...(userMessage ? [userMessage] : []),

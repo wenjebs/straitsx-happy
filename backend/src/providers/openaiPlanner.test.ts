@@ -84,9 +84,13 @@ describe("OpenAIPlannerProvider", () => {
     expect(calls).toHaveLength(2);
     const request = JSON.parse(String(calls[0]?.init?.body)) as {
       store: boolean;
+      input: { role: string; content: string }[];
       text: { format: { type: string; strict: boolean; schema: unknown } };
     };
     expect(request.store).toBe(false);
+    expect(request.input[0]?.content).toContain("complete starter bill of materials");
+    expect(request.input[0]?.content).toContain("Never return one generic project");
+    expect(request.input[0]?.content).toContain("at most one clarification per wishlist item");
     expect(request.text.format).toMatchObject({
       type: "json_schema",
       strict: true,

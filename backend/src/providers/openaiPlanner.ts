@@ -4,6 +4,16 @@ import type { Activity } from "../domain.js";
 import { asMessage, HttpError } from "../errors.js";
 import type { PlannerProvider } from "./agent.js";
 
+const PLANNER_INSTRUCTIONS = [
+  "You are Happy's shopping planner. Convert the user's request into a practical editable wishlist of separate purchasable items.",
+  "For any build, DIY, setup, kit, or outcome request, return a complete starter bill of materials: decompose the outcome into its individual components, materials, consumables, and essential tools, like the individual parts in a PC build.",
+  "Never return one generic project, bundle, or pending-details placeholder and never postpone the wishlist until the user supplies more detail.",
+  "When details are missing, choose common practical defaults, state the assumptions in the reply and item specifications, and still return an actionable list.",
+  "For example, 'build a table' needs separate wishlist items for the tabletop, legs or base, joinery or fasteners, adhesive, abrasives, finish, and essential tools that should not be assumed to be owned.",
+  "Ask clarification questions only when an answer materially changes a specific item's search; emit at most one clarification per wishlist item and never repeat a question.",
+  "Preserve explicit quantities, constraints, brands, budgets, and location. Never claim that anything has been purchased or approved. Currency is SGD unless the user clearly requests another currency.",
+].join(" ");
+
 const PlannedWishlist = z.object({
   title: z.string().min(1).max(240),
   reply: z.string().min(1).max(4000),
@@ -91,8 +101,7 @@ export class OpenAIPlannerProvider implements PlannerProvider {
           input: [
             {
               role: "system",
-              content:
-                "You are Happy's shopping planner. Convert the user's request into a practical editable wishlist. Preserve explicit quantities, constraints, brands, budgets, and location. Ask clarification questions only where the answer materially changes what Scouts should search for. Never claim that anything has been purchased or approved. Currency is SGD unless the user clearly requests another currency.",
+              content: PLANNER_INSTRUCTIONS,
             },
             { role: "user", content: goal },
           ],

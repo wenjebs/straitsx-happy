@@ -129,7 +129,24 @@ describe("Happy backend contract", () => {
             category: "Electronics",
           },
         ],
-        clarifications: [],
+        clarifications: [
+          {
+            itemId: "keyboard",
+            prompt: "Which switch style?",
+            options: [
+              { name: "Quiet", range: "S$20–S$25", why: "Office friendly", imgLabel: "quiet" },
+              { name: "Clicky", range: "S$20–S$25", why: "Tactile", imgLabel: "clicky" },
+            ],
+          },
+          {
+            itemId: "keyboard",
+            prompt: "Duplicate question that must not repeat",
+            options: [
+              { name: "Wired", range: "S$20", why: "Simple", imgLabel: "wired" },
+              { name: "Wireless", range: "S$25", why: "Portable", imgLabel: "wireless" },
+            ],
+          },
+        ],
       }),
     });
     expect(wishlist.status).toBe(202);
@@ -145,9 +162,20 @@ describe("Happy backend contract", () => {
 
     const approved = (await (
       await app.request(`/v1/activities/${created.id}/wishlist/approve`, { method: "POST" })
-    ).json()) as { stage: string; wishlist: { id: string }[] };
+    ).json()) as {
+      stage: string;
+      wishlist: { id: string }[];
+      clarifications: { itemId: string }[];
+    };
     expect(approved.stage).toBe("curate");
     expect(approved.wishlist[0]?.id).toBe("keyboard");
+    expect(approved.clarifications).toHaveLength(1);
+    const chosen = await app.request(`/v1/activities/${created.id}/clarifications/keyboard`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ option: "Quiet" }),
+    });
+    expect(chosen.status).toBe(200);
     const dispatch = await app.request(`/v1/activities/${created.id}/dispatch`, { method: "POST" });
     expect(dispatch.status).toBe(200);
     expect(agents.searches).toBe(1);
