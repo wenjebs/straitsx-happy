@@ -5,6 +5,17 @@ const optionalString = z.preprocess(
   (value) => (value === "" ? undefined : value),
   z.string().min(1).optional(),
 );
+const optionalAddress = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/)
+    .optional(),
+);
+const optionalSecret = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(32).optional(),
+);
 
 const Env = z
   .object({
@@ -16,6 +27,10 @@ const Env = z
     AWS_REGION: z.string().default("ap-southeast-1"),
     FRONTEND_ORIGIN: z.string().default("http://localhost:4040"),
     PUBLIC_BASE_URL: z.url().default("http://localhost:8787"),
+    AUTH_MODE: z.enum(["disabled", "local", "cognito"]).default("local"),
+    AUTH_SESSION_SECRET: optionalSecret,
+    COGNITO_USER_POOL_ID: optionalString,
+    COGNITO_CLIENT_ID: optionalString,
     PLANNER_MODE: z.enum(["local", "openai", "remote", "disabled"]).default("local"),
     SCOUT_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
     OPENAI_API_KEY: optionalString,
@@ -31,6 +46,16 @@ const Env = z
     PURCHASE_AGENT_API_BASE_URL: optionalUrl,
     PURCHASE_AGENT_API_TOKEN: optionalString,
     PURCHASE_CALLBACK_TOKEN: optionalString,
+    FUNDING_MODE: z.enum(["chain", "disabled"]).default("disabled"),
+    HAPPY_WALLET_ADDRESS: optionalAddress,
+    CHAIN_ID: z.coerce.number().int().positive().default(43113),
+    RPC_URL: optionalUrl,
+    XSGD_ADDRESS: optionalAddress,
+    XSGD_DECIMALS: z.coerce.number().int().min(2).max(18).default(6),
+    FUNDING_NETWORK_NAME: z.string().min(1).default("Avalanche Fuji C-Chain"),
+    FUNDING_EXPLORER_URL: z.url().default("https://subnets-test.avax.network/c-chain"),
+    DEPOSIT_CONFIRMATIONS: z.coerce.number().int().min(1).max(100).default(1),
+    WALLET_AUTH_SECRET: optionalSecret,
     PAYMENT_MIN_MINOR: z.coerce.number().int().nonnegative().default(500),
     PAYMENT_MAX_MINOR: z.coerce.number().int().positive().default(3000),
     PAYMENT_ATTEMPTS_PER_LISTING: z.coerce.number().int().min(1).max(5).default(2),
@@ -58,6 +83,24 @@ const Env = z
         path: ["DYNAMODB_TABLE"],
         message: "is required when DATA_STORE=dynamodb",
       });
+    }
+    if (env.AUTH_MODE === "local" && !env.AUTH_SESSION_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AUTH_SESSION_SECRET"],
+        message: "is required when AUTH_MODE=local",
+      });
+    }
+    if (env.AUTH_MODE === "cognito") {
+      for (const field of ["COGNITO_USER_POOL_ID", "COGNITO_CLIENT_ID"] as const) {
+        if (!env[field]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [field],
+            message: "is required when AUTH_MODE=cognito",
+          });
+        }
+      }
     }
     if ((env.PLANNER_MODE === "remote" || env.SCOUT_MODE === "remote") && !env.AGENT_API_BASE_URL) {
       ctx.addIssue({
@@ -105,6 +148,22 @@ const Env = z
         path: ["PURCHASE_CALLBACK_TOKEN"],
         message: "is required when PURCHASE_AGENT_MODE=remote",
       });
+    }
+    if (env.FUNDING_MODE === "chain") {
+      for (const field of [
+        "HAPPY_WALLET_ADDRESS",
+        "RPC_URL",
+        "XSGD_ADDRESS",
+        "WALLET_AUTH_SECRET",
+      ] as const) {
+        if (!env[field]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [field],
+            message: `is required when FUNDING_MODE=chain`,
+          });
+        }
+      }
     }
     if (env.PAYMENT_MIN_MINOR > env.PAYMENT_MAX_MINOR) {
       ctx.addIssue({

@@ -109,6 +109,9 @@ importers:
 
   backend:
     dependencies:
+      '@aws-sdk/client-cognito-identity-provider':
+        specifier: ^3.1106.0
+        version: 3.1106.0
       '@aws-sdk/client-dynamodb':
         specifier: ^3
         version: 3.1106.0
@@ -118,9 +121,15 @@ importers:
       '@hono/node-server':
         specifier: ^2
         version: 2.1.0(hono@4.13.1)
+      aws-jwt-verify:
+        specifier: ^5.2.1
+        version: 5.2.1
       hono:
         specifier: ^4
         version: 4.13.1
+      viem:
+        specifier: 2.55.11
+        version: 2.55.11(typescript@5.9.3)(zod@4.4.3)
       zod:
         specifier: ^4
         version: 4.4.3
@@ -146,6 +155,9 @@ importers:
       react-dom:
         specifier: ^19
         version: 19.2.8(react@19.2.8)
+      viem:
+        specifier: 2.55.11
+        version: 2.55.11(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
       '@types/react':
         specifier: ^19
@@ -274,6 +286,10 @@ packages:
 
   '@aws-sdk/client-bedrock-agentcore@3.1106.0':
     resolution: {integrity: sha512-agFzXcryRkjm9xFY31+LSmYcXQy6DyckKd1y51MwSF2ijjeXoimwtRLktJbqgk9Cp9SpjdIEqxo28mmCT6j4Xw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-cognito-identity-provider@3.1106.0':
+    resolution: {integrity: sha512-fR2190SaXnntDkF0gUTSG05Z7DyHQ00Z7HlJip+uR4DkD/9LjbBn5EXLFWEPYQpIC8o2v1UTqjK38HYRQoT7PA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-dynamodb@3.1106.0':
@@ -1149,6 +1165,10 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
+  aws-jwt-verify@5.2.1:
+    resolution: {integrity: sha512-J+buA4M+qvQDk58WXFBLkDodkEX3DDL1ac5XFQPW3opxAsaLXYu5hYnlSHsaBRDBUXBAn695kE/cw/mdyJKwJg==}
+    engines: {node: '>=18.0.0'}
+
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
@@ -1179,8 +1199,8 @@ packages:
   brace-expansion@2.1.4:
     resolution: {integrity: sha512-hGfVzPxthbf3+2yjg/RBs60cB0FhqBS/zvdV/4wn4/BmN0bNMMHPc4V/BbFieqf1TKAGGAHnY4eSjajCl0f2Xg==}
 
-  browserslist@4.28.7:
-    resolution: {integrity: sha512-JxV13hNrFxqjOc8alRbq9dK1MM79NEXYpma2B2J4wAtpWS5zIEIKqWPGCl7N4o7Uc7B7itylh7SuDujATRyyTw==}
+  browserslist@4.28.8:
+    resolution: {integrity: sha512-V2NpofLblG64mfOtSgDhOJESZEGogzDMBv/q+W6oc4LXWP/q75eOXoOaaOu1EOadB9U4Bwx/e0yzbvwKH8zalA==}
     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
     hasBin: true
 
@@ -1907,6 +1927,17 @@ snapshots:
       '@smithy/types': 4.16.1
       tslib: 2.8.1
 
+  '@aws-sdk/client-cognito-identity-provider@3.1106.0':
+    dependencies:
+      '@aws-sdk/core': 3.977.6
+      '@aws-sdk/credential-provider-node': 3.972.78
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.13
+      '@smithy/node-http-handler': 4.9.13
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
   '@aws-sdk/client-dynamodb@3.1106.0':
     dependencies:
       '@aws-sdk/core': 3.977.6
@@ -2166,7 +2197,7 @@ snapshots:
     dependencies:
       '@babel/compat-data': 7.29.7
       '@babel/helper-validator-option': 7.29.7
-      browserslist: 4.28.7
+      browserslist: 4.28.8
       lru-cache: 5.1.1
       semver: 6.3.1
 
@@ -2778,6 +2809,8 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
+  aws-jwt-verify@5.2.1: {}
+
   balanced-match@1.0.2: {}
 
   base64-js@1.5.1: {}
@@ -2800,13 +2833,13 @@ snapshots:
     dependencies:
       balanced-match: 1.0.2
 
-  browserslist@4.28.7:
+  browserslist@4.28.8:
     dependencies:
       baseline-browser-mapping: 2.11.12
       caniuse-lite: 1.0.30001809
       electron-to-chromium: 1.5.402
       node-releases: 2.0.53
-      update-browserslist-db: 1.3.0(browserslist@4.28.7)
+      update-browserslist-db: 1.3.0(browserslist@4.28.8)
 
   buffer-equal-constant-time@1.0.1: {}
 
@@ -3382,9 +3415,9 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  update-browserslist-db@1.3.0(browserslist@4.28.7):
+  update-browserslist-db@1.3.0(browserslist@4.28.8):
     dependencies:
-      browserslist: 4.28.7
+      browserslist: 4.28.8
       escalade: 3.2.0
       picocolors: 1.1.1
 

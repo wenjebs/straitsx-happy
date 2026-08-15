@@ -78,7 +78,6 @@ export interface ExecutionRow {
   liveStreamUrl?: string | undefined;
 }
 
-/** Durable cursor for the asynchronous Closer-agent purchase state machine. */
 /**
  * One item's attempt at being bought: its own card, its own grant, its own browser.
  *
@@ -174,20 +173,76 @@ export interface ActivityCheckpoint {
   activity: Activity;
 }
 
+export interface WalletTransaction {
+  id: string;
+  ts: string;
+  label: string;
+  ref: string;
+  amount: string;
+  debit: boolean;
+}
+
 export interface Wallet {
   balanceMinor: number;
   address: string;
   network: string;
   cards: { pan: string; amount: string; status: "issued" | "viewed" | "used" | "expired" }[];
-  transactions: {
-    id: string;
-    ts: string;
-    label: string;
-    ref: string;
-    amount: string;
-    debit: boolean;
-  }[];
+  transactions: WalletTransaction[];
   receipt?: string;
+}
+
+export type WalletDepositStatus = "pending" | "confirmed" | "failed";
+
+/** Durable, idempotent record of an on-chain XSGD transfer into Happy's shared wallet. */
+export interface WalletDeposit {
+  id: string;
+  userId: string;
+  txHash: string;
+  sourceAddress: string;
+  destinationAddress: string;
+  tokenAddress: string;
+  chainId: number;
+  status: WalletDepositStatus;
+  amountAtomic: string | null;
+  amountMinor: number | null;
+  confirmations: number;
+  requiredConfirmations: number;
+  blockNumber?: string | undefined;
+  failureReason?: string | undefined;
+  explorerUrl?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string | undefined;
+}
+
+export type FundingConfiguration =
+  | {
+      enabled: false;
+      mode: "disabled";
+      message: string;
+    }
+  | {
+      enabled: true;
+      mode: "chain";
+      walletAddress: string;
+      tokenAddress: string;
+      tokenSymbol: "XSGD";
+      tokenDecimals: number;
+      chainId: number;
+      networkName: string;
+      rpcUrl: string;
+      explorerUrl: string;
+      requiredConfirmations: number;
+    };
+
+export interface WalletFundingSnapshot {
+  configuration: FundingConfiguration;
+  deposits: WalletDeposit[];
+}
+
+export interface WalletDepositResult {
+  deposit: WalletDeposit;
+  wallet: Wallet;
 }
 
 export interface Mandate {

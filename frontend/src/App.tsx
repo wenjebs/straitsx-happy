@@ -14,6 +14,7 @@ import { ArchiveScreen } from "./screens/ArchiveScreen";
 import { BrowserTestScreen } from "./screens/BrowserTestScreen";
 import { ChatScreen } from "./screens/ChatScreen";
 import { ExecutionScreen } from "./screens/ExecutionScreen";
+import { LoginScreen } from "./screens/LoginScreen";
 import { MandateScreen } from "./screens/MandateScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { SearchScreen } from "./screens/SearchScreen";
@@ -21,6 +22,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { ShortlistScreen } from "./screens/ShortlistScreen";
 import { WalletScreen } from "./screens/WalletScreen";
 import { formatMinor, stageBarFraction } from "./state/derive";
+import { useAuth } from "./state/useAuth";
 import { useHappy } from "./state/useHappy";
 
 const HEADER_META: Record<ActivityStage, string> = {
@@ -41,6 +43,40 @@ const SCREEN_TITLE = {
 } as const;
 
 export function App() {
+  const auth = useAuth();
+
+  if (auth.state.loading) {
+    return (
+      <div className={styles.authLoading}>
+        <span />
+        <strong>Happy</strong>
+      </div>
+    );
+  }
+
+  if (!auth.state.user) {
+    return (
+      <LoginScreen
+        working={auth.state.working}
+        error={auth.state.error}
+        onLogin={auth.actions.login}
+        onSignup={auth.actions.signup}
+        onConfirm={auth.actions.confirmSignup}
+        onClearError={auth.actions.clearError}
+      />
+    );
+  }
+
+  return <AuthenticatedApp user={auth.state.user} onLogout={auth.actions.logout} />;
+}
+
+function AuthenticatedApp({
+  user,
+  onLogout,
+}: {
+  user: { initials: string };
+  onLogout: () => Promise<void>;
+}) {
   const { state, actions, displayed } = useHappy();
 
   const onPurchase = state.screen === "purchase";
@@ -87,6 +123,7 @@ export function App() {
           onBack={actions.back}
           onCancel={actions.requestActivityCancel}
           onProfile={() => actions.goScreen("profile")}
+          initials={state.profile?.initials ?? user.initials}
         />
 
         <ConnectionBanner
@@ -150,7 +187,7 @@ export function App() {
             )}
 
             {state.screen === "wallet" && (
-              <WalletScreen wallet={state.wallet} onTopUp={() => void actions.topUp()} />
+              <WalletScreen wallet={state.wallet} onWalletUpdated={actions.setWallet} />
             )}
             {state.screen === "mandate" && (
               <MandateScreen
@@ -164,7 +201,9 @@ export function App() {
                 onToggle={(key) => void actions.setSetting(key)}
               />
             )}
-            {state.screen === "profile" && <ProfileScreen profile={state.profile} />}
+            {state.screen === "profile" && (
+              <ProfileScreen profile={state.profile} onSignOut={() => void onLogout()} />
+            )}
             {state.screen === "browsertest" && <BrowserTestScreen />}
           </section>
 

@@ -10,6 +10,7 @@ interface HeaderProps {
   onBack: () => void;
   onCancel?: () => void;
   onProfile: () => void;
+  initials: string;
 }
 
 export function Header({
@@ -21,6 +22,7 @@ export function Header({
   onBack,
   onCancel,
   onProfile,
+  initials,
 }: HeaderProps) {
   return (
     <header className={styles.header}>
@@ -52,7 +54,7 @@ export function Header({
           title="Profile"
           aria-label="Profile"
         >
-          <span className={styles.avatar}>TL</span>
+          <span className={styles.avatar}>{initials}</span>
         </button>
       </div>
     </header>
