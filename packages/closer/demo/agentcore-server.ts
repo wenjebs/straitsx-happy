@@ -474,6 +474,27 @@ const server = createServer(async (req, res) => {
       return res.end(buf);
     }
 
+    // GET /sessions/:id/page — title and a slice of body text.
+    //
+    // Exists because a URL is not evidence. Shopee serves its "Page Unavailable" block AT the
+    // product URL rather than redirecting, so a session can look like it landed while showing a
+    // wall. Twice this project reported a merchant reachable on the strength of page.url() alone.
+    if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "page") {
+      const slot = requireSlot(parts[1]);
+      // Typechecked with Node's libs, which have no DOM — hence the structural cast. The body
+      // still runs in the page, where these exist.
+      const info = await slot.page.evaluate(() => {
+        const g = globalThis as unknown as {
+          document: { title: string; body: { innerText: string } | null };
+        };
+        return {
+          title: g.document.title,
+          text: (g.document.body?.innerText ?? "").replace(/\s+/g, " ").slice(0, 600),
+        };
+      });
+      return send(res, 200, { url: slot.page.url(), ...info });
+    }
+
     // GET /sessions/:id/cardfields
     if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "cardfields") {
       return send(res, 200, await cardFieldReport(requireSlot(parts[1])));
