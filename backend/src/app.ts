@@ -300,7 +300,15 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
   app.get("/v1/closer/*", async (c) => {
     const upstream = deps.config.PURCHASE_AGENT_API_BASE_URL;
     if (!upstream) throw new HttpError(404, "No Closer is configured on this stack.");
+    /*
+     * Allowlisted, not forwarded blindly. The Closer answers job submissions on the same origin,
+     * so a proxy that passes any path through is a route into it from the public internet. Only
+     * the two live-view URLs may cross, and the shape below admits no traversal.
+     */
     const suffix = c.req.path.slice("/v1/closer".length);
+    if (!/^\/v1\/live\/[A-Za-z0-9_-]{8,128}(?:\/stream)?$/.test(suffix)) {
+      throw new HttpError(404, "Not found.");
+    }
     const response = await fetch(`${upstream.replace(/\/$/, "")}${suffix}`, {
       headers: { accept: c.req.header("accept") ?? "*/*" },
     }).catch(() => null);
