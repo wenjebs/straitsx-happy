@@ -6,6 +6,8 @@ import type {
   PurchaseRun,
   Settings,
   Wallet,
+  WalletDeposit,
+  WalletTransaction,
 } from "./domain.js";
 
 export interface PurchaseClaim {
@@ -21,6 +23,15 @@ export interface Repository {
 
   getWallet(userId: string): Promise<Wallet>;
   putWallet(userId: string, wallet: Wallet): Promise<void>;
+  listWalletDeposits(userId: string): Promise<WalletDeposit[]>;
+  getWalletDeposit(txHash: string): Promise<WalletDeposit | null>;
+  createWalletDeposit(deposit: WalletDeposit): Promise<WalletDeposit>;
+  putWalletDeposit(deposit: WalletDeposit): Promise<void>;
+  confirmWalletDeposit(
+    deposit: WalletDeposit,
+    transaction: WalletTransaction,
+    receipt: string,
+  ): Promise<{ deposit: WalletDeposit; wallet: Wallet }>;
   getMandate(userId: string): Promise<Mandate>;
   putMandate(userId: string, mandate: Mandate): Promise<void>;
   getSettings(userId: string): Promise<Settings>;

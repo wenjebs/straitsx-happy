@@ -73,6 +73,12 @@
   background: var(--hover-primary);
 }
 
+.primary:disabled,
+.depositActions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .secondary {
   padding: 9px 15px;
   border: 1px solid var(--border-strong);
@@ -90,6 +96,221 @@
   border-radius: var(--r-control);
   padding: 8px 10px;
   background: var(--surface-muted);
+}
+
+.warning,
+.error {
+  margin-top: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  padding: 10px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: var(--surface-muted);
+}
+
+.error,
+.failure {
+  color: #9d2c2c;
+}
+
+.helper {
+  margin: 10px 0 0;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.networkRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.addressBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  padding: 9px 10px;
+  background: var(--surface-muted);
+}
+
+.addressBox > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.copy {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.fundingControls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.amountField {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.amountInputWrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  padding-left: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.amountInputWrap input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  padding: 9px 8px 9px 4px;
+  background: transparent;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.connected {
+  margin-top: 9px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-quaternary);
+}
+
+.deposits {
+  margin: 10px 0 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+
+.depositRow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.depositRow:last-child,
+.txn:last-child {
+  border-bottom: 0;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-quaternary);
+}
+
+.pending {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.confirmed {
+  background: #4b8b62;
+}
+
+.failed {
+  background: #b04a4a;
+}
+
+.depositMain {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+}
+
+.depositMain > span:nth-child(2),
+.failure {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-quaternary);
+}
+
+.failure {
+  color: #9d2c2c;
+}
+
+.depositActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.depositActions a,
+.depositActions button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  text-decoration: none;
+}
+
+.empty {
+  padding: 18px 16px;
+  color: var(--text-quaternary);
+  font-size: 12px;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@media (max-width: 680px) {
+  .screen {
+    padding: 20px 16px 32px;
+  }
+
+  .fundingControls,
+  .depositRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .depositActions {
+    justify-content: flex-end;
+  }
 }
 
 .cards {

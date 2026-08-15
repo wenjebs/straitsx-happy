@@ -3,9 +3,10 @@ import styles from "./ProfileScreen.module.css";
 
 interface ProfileScreenProps {
   profile: Profile | null;
+  onSignOut: () => void;
 }
 
-export function ProfileScreen({ profile }: ProfileScreenProps) {
+export function ProfileScreen({ profile, onSignOut }: ProfileScreenProps) {
   if (!profile) return <div className={styles.screen} />;
 
   return (
@@ -28,7 +29,7 @@ export function ProfileScreen({ profile }: ProfileScreenProps) {
           ))}
         </div>
 
-        <button type="button" className={styles.signOut}>
+        <button type="button" className={styles.signOut} onClick={onSignOut}>
           Sign out
         </button>
       </div>

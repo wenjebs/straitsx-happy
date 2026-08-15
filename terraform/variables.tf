@@ -69,6 +69,74 @@ variable "purchase_agent_api_base_url" {
   default     = ""
 }
 
+variable "funding_mode" {
+  description = "Inbound XSGD funding verifier mode: disabled or chain."
+  type        = string
+  default     = "disabled"
+
+  validation {
+    condition     = contains(["disabled", "chain"], var.funding_mode)
+    error_message = "funding_mode must be disabled or chain."
+  }
+}
+
+variable "happy_wallet_address" {
+  description = "Public Avalanche address of Happy's shared, pre-funded wallet."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.happy_wallet_address == "" || can(regex("^0x[0-9a-fA-F]{40}$", var.happy_wallet_address))
+    error_message = "happy_wallet_address must be blank or a 20-byte EVM address."
+  }
+}
+
+variable "funding_chain_id" {
+  description = "Avalanche chain id used for inbound XSGD funding."
+  type        = number
+  default     = 43113
+}
+
+variable "funding_rpc_url" {
+  description = "Public Avalanche JSON-RPC endpoint used to verify deposits."
+  type        = string
+  default     = "https://api.avax-test.network/ext/bc/C/rpc"
+}
+
+variable "xsgd_address" {
+  description = "XSGD token contract on the configured funding chain."
+  type        = string
+  default     = "0xd769410dc8772695a7f55a304d2125320a65c2a5"
+
+  validation {
+    condition     = can(regex("^0x[0-9a-fA-F]{40}$", var.xsgd_address))
+    error_message = "xsgd_address must be a 20-byte EVM address."
+  }
+}
+
+variable "funding_network_name" {
+  description = "Wallet-facing funding network name."
+  type        = string
+  default     = "Avalanche Fuji C-Chain"
+}
+
+variable "funding_explorer_url" {
+  description = "Block explorer base URL for funding receipts."
+  type        = string
+  default     = "https://subnets-test.avax.network/c-chain"
+}
+
+variable "deposit_confirmations" {
+  description = "Confirmations required before crediting an XSGD deposit."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.deposit_confirmations >= 1 && var.deposit_confirmations <= 100
+    error_message = "deposit_confirmations must be between 1 and 100."
+  }
+}
+
 variable "payment_min_minor" {
   description = "Smallest issuable card amount in SGD cents."
   type        = number

@@ -8,6 +8,8 @@ in DynamoDB in production, and orchestrates four deliberately separate capabilit
 3. **StraitsX card provider** — issues an exact-value card only when Closer claims its grant.
 4. **Closer purchase agent** — receives one approved listing and a short-lived grant, actively
    claims the card, checks out, and reports milestones plus its livestream.
+5. **XSGD funding verifier** — verifies inbound XSGD transfers on Avalanche and atomically credits
+   the corresponding user's durable Happy ledger.
 
 The backend never persists a PAN, raw card grant, or card capability token. Purchases are
 sequential, callback events are deduplicated, stale attempt callbacks are rejected, and a retry
@@ -51,6 +53,68 @@ PURCHASE_CALLBACK_TOKEN=...
 
 Set any mode to `disabled` to make its dependent mutation return a readable `503`.
 
+## Account authentication
+
+Local development uses backend-issued email/password sessions and requires a separate random
+server secret:
+
+```dotenv
+AUTH_MODE=local
+AUTH_SESSION_SECRET=replace-with-a-random-32-character-secret
+```
+
+Create an account from the frontend login page. Local users live in process memory, while their
+signed seven-day session survives a normal page refresh. AWS deployments set `AUTH_MODE=cognito`;
+Terraform creates the Cognito User Pool and web client and passes their IDs to ECS. Cognito users
+confirm their email before signing in, and the frontend refreshes expired ID tokens without
+putting a Cognito secret in the browser.
+
+All browser API routes except health and signup/login/confirmation require `Authorization: Bearer
+<account-token>`. Activities, immutable checkpoints, wallet ledger, deposits, mandate and settings
+are keyed by the authenticated account. Scout/Closer callbacks retain their separate service
+tokens.
+
+## Shared-wallet XSGD funding
+
+Funding is deliberately separate from card issuance. The browser asks the user's injected EVM
+wallet to call XSGD `transfer(HAPPY_WALLET_ADDRESS, amount)`; the backend never receives the
+user's key. After submission, the backend reads the configured Avalanche RPC and credits the
+account only when the receipt is successful and contains exactly one XSGD `Transfer` from the
+connected address to Happy's configured shared wallet. The transaction hash is a global
+idempotency key, so it cannot be credited twice.
+
+Enable the real flow on Fuji with:
+
+```dotenv
+FUNDING_MODE=chain
+HAPPY_WALLET_ADDRESS=0x...
+CHAIN_ID=43113
+RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
+XSGD_ADDRESS=0xd769410dc8772695a7f55a304d2125320a65c2a5
+XSGD_DECIMALS=6
+FUNDING_NETWORK_NAME=Avalanche Fuji C-Chain
+FUNDING_EXPLORER_URL=https://subnets-test.avax.network/c-chain
+DEPOSIT_CONFIRMATIONS=1
+WALLET_AUTH_SECRET=replace-with-a-random-32-character-secret
+```
+
+`HAPPY_WALLET_ADDRESS` is public and must match the shared wallet that Stage 2 will use to sign
+card payments. `SPEND_PRIVATE_KEY` is not read by the funding provider. For production use chain
+43114, the production XSGD address, the mainnet RPC/explorer, and an operational confirmation
+policy. A confirmed deposit is custodial: Happy controls the XSGD after the transfer.
+Before funding, the browser signs a five-minute ownership challenge that explicitly grants no
+spending permission. Happy exchanges it for a 24-hour HMAC-protected wallet session bound to the
+logged-in Happy account. The account token remains in `Authorization`; the wallet proof is sent in
+`X-Happy-Wallet-Session`. This prevents a valid wallet proof from crediting a different account.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/wallet/auth/challenge` | Create a wallet-ownership message to sign. |
+| `POST` | `/v1/wallet/auth/verify` | Verify the signature and return a funding session. |
+| `GET` | `/v1/wallet/funding` | Shared-wallet/network configuration and deposit history. |
+| `POST` | `/v1/wallet/deposits` | Register `{ txHash, sourceAddress }` and verify it. |
+| `GET` | `/v1/wallet/deposits/:txHash` | Refresh a pending deposit's confirmations. |
+
 ## Happy OpenAI planner
 
 Happy calls `POST /v1/responses` with `store: false` and a strict JSON Schema. The result contains
@@ -79,7 +143,6 @@ The callback is `POST /v1/integrations/agents/:activityId/events`. Accepted even
 | Path | Request purpose | Required response |
 |---|---|---|
 | `POST /v1/cards` | Issue the exact listing amount when Closer claims an approved grant. | `{ cardId, last4, agentAccess: { revealUrl, token, expiresAt? } }` |
-| `POST /v1/wallet/topups` | Confirm an XSGD wallet top-up. | `{ transactionId, confirmations }` |
 
 `agentAccess` must be short-lived and single-use. Happy returns it only in the response to
 Closer's card-claim request and does not store the token.
@@ -120,6 +183,8 @@ Production uses one table:
 | Activities by user/date | `gsi1pk=USER#<id>`, `gsi1sk=<createdAt>#<id>` |
 | Purchase state-machine cursor | `pk=ACTIVITY#<id>`, `sk=PURCHASE` |
 | Wallet/mandate/settings/profile | `pk=USER#<id>`, `sk=<type>` |
+| XSGD deposit by transaction hash | `pk=DEPOSIT#<txHash>`, `sk=META` |
+| Deposits by user/date | `gsi1pk=USER#<id>`, `gsi1sk=<createdAt>#<txHash>` |
 | Purchase/idempotency lock | `pk=PURCHASE#<activityId>`, `sk=LOCK` |
 
 Every `putActivity` atomically writes the latest `META` document and a full immutable checkpoint.

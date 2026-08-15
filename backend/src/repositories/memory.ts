@@ -1,4 +1,10 @@
-import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
+import {
+  defaultFundingWallet,
+  defaultMandate,
+  defaultProfile,
+  defaultSettings,
+  defaultWallet,
+} from "../defaults.js";
 import type {
   Activity,
   ActivityCheckpoint,
@@ -7,13 +13,17 @@ import type {
   PurchaseRun,
   Settings,
   Wallet,
+  WalletDeposit,
+  WalletTransaction,
 } from "../domain.js";
+import { DEFAULT_USER_ID } from "../domain.js";
 import type { PurchaseClaim, Repository } from "../repository.js";
 
 export class MemoryRepository implements Repository {
   private readonly activities = new Map<string, Activity>();
   private readonly activityCheckpoints = new Map<string, ActivityCheckpoint[]>();
   private readonly wallets = new Map<string, Wallet>();
+  private readonly walletDeposits = new Map<string, WalletDeposit>();
   private readonly mandates = new Map<string, Mandate>();
   private readonly settings = new Map<string, Settings>();
   private readonly profiles = new Map<string, Profile>();
@@ -53,13 +63,61 @@ export class MemoryRepository implements Repository {
   }
 
   async getWallet(userId: string): Promise<Wallet> {
-    const wallet = this.wallets.get(userId) ?? defaultWallet();
+    const wallet =
+      this.wallets.get(userId) ??
+      (userId === DEFAULT_USER_ID ? defaultWallet() : defaultFundingWallet());
     this.wallets.set(userId, structuredClone(wallet));
     return structuredClone(wallet);
   }
 
   async putWallet(userId: string, wallet: Wallet): Promise<void> {
     this.wallets.set(userId, structuredClone(wallet));
+  }
+
+  async listWalletDeposits(userId: string): Promise<WalletDeposit[]> {
+    return [...this.walletDeposits.values()]
+      .filter((deposit) => deposit.userId === userId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map((deposit) => structuredClone(deposit));
+  }
+
+  async getWalletDeposit(txHash: string): Promise<WalletDeposit | null> {
+    const deposit = this.walletDeposits.get(txHash.toLowerCase());
+    return deposit ? structuredClone(deposit) : null;
+  }
+
+  async createWalletDeposit(deposit: WalletDeposit): Promise<WalletDeposit> {
+    const key = deposit.txHash.toLowerCase();
+    const existing = this.walletDeposits.get(key);
+    if (existing) return structuredClone(existing);
+    this.walletDeposits.set(key, structuredClone(deposit));
+    return structuredClone(deposit);
+  }
+
+  async putWalletDeposit(deposit: WalletDeposit): Promise<void> {
+    this.walletDeposits.set(deposit.txHash.toLowerCase(), structuredClone(deposit));
+  }
+
+  async confirmWalletDeposit(
+    deposit: WalletDeposit,
+    transaction: WalletTransaction,
+    receipt: string,
+  ): Promise<{ deposit: WalletDeposit; wallet: Wallet }> {
+    const key = deposit.txHash.toLowerCase();
+    const existing = this.walletDeposits.get(key);
+    if (existing?.status === "confirmed") {
+      return { deposit: structuredClone(existing), wallet: await this.getWallet(existing.userId) };
+    }
+    if (existing?.status !== "pending" || deposit.amountMinor === null) {
+      throw new Error("Deposit is not eligible to be credited.");
+    }
+    const wallet = await this.getWallet(deposit.userId);
+    wallet.balanceMinor += deposit.amountMinor;
+    wallet.receipt = receipt;
+    wallet.transactions.unshift(structuredClone(transaction));
+    this.wallets.set(deposit.userId, structuredClone(wallet));
+    this.walletDeposits.set(key, structuredClone(deposit));
+    return { deposit: structuredClone(deposit), wallet: structuredClone(wallet) };
   }
 
   async getMandate(userId: string): Promise<Mandate> {

@@ -10,7 +10,13 @@ import {
   QueryCommand,
   TransactWriteCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
+import {
+  defaultFundingWallet,
+  defaultMandate,
+  defaultProfile,
+  defaultSettings,
+  defaultWallet,
+} from "../defaults.js";
 import type {
   Activity,
   ActivityCheckpoint,
@@ -19,7 +25,10 @@ import type {
   PurchaseRun,
   Settings,
   Wallet,
+  WalletDeposit,
+  WalletTransaction,
 } from "../domain.js";
+import { DEFAULT_USER_ID } from "../domain.js";
 import type { PurchaseClaim, Repository } from "../repository.js";
 
 interface Stored<T> {
@@ -59,7 +68,12 @@ export class DynamoRepository implements Repository {
         TableName: this.options.tableName,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `USER#${userId}` },
+        FilterExpression: "#entity = :entity",
+        ExpressionAttributeNames: { "#entity": "entity" },
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userId}`,
+          ":entity": "activity",
+        },
         ScanIndexForward: false,
       }),
     );
@@ -123,11 +137,112 @@ export class DynamoRepository implements Repository {
   }
 
   async getWallet(userId: string): Promise<Wallet> {
-    return this.getState(userId, "WALLET", defaultWallet);
+    return this.getState(
+      userId,
+      "WALLET",
+      userId === DEFAULT_USER_ID ? defaultWallet : defaultFundingWallet,
+    );
   }
 
   async putWallet(userId: string, wallet: Wallet): Promise<void> {
     await this.putState(userId, "WALLET", wallet);
+  }
+
+  async listWalletDeposits(userId: string): Promise<WalletDeposit[]> {
+    const result = await this.document.send(
+      new QueryCommand({
+        TableName: this.options.tableName,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        FilterExpression: "#entity = :entity",
+        ExpressionAttributeNames: { "#entity": "entity" },
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userId}`,
+          ":entity": "wallet-deposit",
+        },
+        ScanIndexForward: false,
+        ConsistentRead: false,
+      }),
+    );
+    return (result.Items ?? []).map((item) => (item as Stored<WalletDeposit>).data);
+  }
+
+  async getWalletDeposit(txHash: string): Promise<WalletDeposit | null> {
+    const stored = await this.get<Stored<WalletDeposit>>(`DEPOSIT#${txHash.toLowerCase()}`, "META");
+    return stored?.data ?? null;
+  }
+
+  async createWalletDeposit(deposit: WalletDeposit): Promise<WalletDeposit> {
+    const item = this.depositItem(deposit);
+    try {
+      await this.document.send(
+        new PutCommand({
+          TableName: this.options.tableName,
+          Item: item,
+          ConditionExpression: "attribute_not_exists(pk)",
+        }),
+      );
+      return deposit;
+    } catch (error) {
+      if (!(error instanceof ConditionalCheckFailedException)) throw error;
+      return (await this.getWalletDeposit(deposit.txHash)) ?? deposit;
+    }
+  }
+
+  async putWalletDeposit(deposit: WalletDeposit): Promise<void> {
+    await this.put(this.depositItem(deposit));
+  }
+
+  async confirmWalletDeposit(
+    deposit: WalletDeposit,
+    transaction: WalletTransaction,
+    receipt: string,
+  ): Promise<{ deposit: WalletDeposit; wallet: Wallet }> {
+    if (deposit.amountMinor === null) throw new Error("Confirmed deposit has no amount.");
+    // Ensure the nested wallet document exists before the atomic update below.
+    await this.getWallet(deposit.userId);
+    try {
+      await this.document.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: this.options.tableName,
+                Key: { pk: `DEPOSIT#${deposit.txHash.toLowerCase()}`, sk: "META" },
+                UpdateExpression: "SET #data = :deposit",
+                ConditionExpression: "#data.#status = :pending",
+                ExpressionAttributeNames: { "#data": "data", "#status": "status" },
+                ExpressionAttributeValues: { ":deposit": deposit, ":pending": "pending" },
+              },
+            },
+            {
+              Update: {
+                TableName: this.options.tableName,
+                Key: { pk: `USER#${deposit.userId}`, sk: "WALLET" },
+                UpdateExpression:
+                  "SET #data.#balance = #data.#balance + :amount, #data.#receipt = :receipt, #data.#transactions = list_append(:transaction, #data.#transactions)",
+                ExpressionAttributeNames: {
+                  "#data": "data",
+                  "#balance": "balanceMinor",
+                  "#receipt": "receipt",
+                  "#transactions": "transactions",
+                },
+                ExpressionAttributeValues: {
+                  ":amount": deposit.amountMinor,
+                  ":receipt": receipt,
+                  ":transaction": [transaction],
+                },
+              },
+            },
+          ],
+        }),
+      );
+    } catch (error) {
+      const existing = await this.getWalletDeposit(deposit.txHash);
+      if (existing?.status !== "confirmed") throw error;
+      return { deposit: existing, wallet: await this.getWallet(existing.userId) };
+    }
+    return { deposit, wallet: await this.getWallet(deposit.userId) };
   }
 
   async getMandate(userId: string): Promise<Mandate> {
@@ -208,6 +323,17 @@ export class DynamoRepository implements Repository {
       entity: key.toLowerCase(),
       data,
     });
+  }
+
+  private depositItem(deposit: WalletDeposit): Stored<WalletDeposit> {
+    return {
+      pk: `DEPOSIT#${deposit.txHash.toLowerCase()}`,
+      sk: "META",
+      entity: "wallet-deposit",
+      data: deposit,
+      gsi1pk: `USER#${deposit.userId}`,
+      gsi1sk: `${deposit.createdAt}#${deposit.txHash.toLowerCase()}`,
+    };
   }
 
   private async get<T>(pk: string, sk: string): Promise<T | null> {
