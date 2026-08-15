@@ -287,6 +287,37 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
   });
 
   /*
+   * The Closer's live view, proxied.
+   *
+   * The Closer runs beside this process with no route of its own — deliberately, since anything
+   * that can reach it can post purchase jobs. Its live view is the one part a browser must load,
+   * so it comes through here and nothing else does. Read-only, GET-only, and the upstream page is
+   * already blanked across card entry.
+   *
+   * Unauthenticated, like the page it forwards: an iframe cannot carry a bearer token. Attempt ids
+   * are random, and no card material is ever rendered while frames are flowing.
+   */
+  app.get("/v1/closer/*", async (c) => {
+    const upstream = deps.config.PURCHASE_AGENT_API_BASE_URL;
+    if (!upstream) throw new HttpError(404, "No Closer is configured on this stack.");
+    const suffix = c.req.path.slice("/v1/closer".length);
+    const response = await fetch(`${upstream.replace(/\/$/, "")}${suffix}`, {
+      headers: { accept: c.req.header("accept") ?? "*/*" },
+    }).catch(() => null);
+    if (!response) throw new HttpError(502, "The Closer live view is unreachable.");
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        "content-type": response.headers.get("content-type") ?? "application/octet-stream",
+        // An event stream that gets buffered shows nothing until it ends, which for a live view
+        // is the same as showing nothing at all.
+        "cache-control": "no-cache, no-transform",
+        "x-accel-buffering": "no",
+      },
+    });
+  });
+
+  /*
    * Card material for the real rail. Only the Closer holding the one-use grant token reaches it,
    * and the response is never logged or written to the audit trail.
    */

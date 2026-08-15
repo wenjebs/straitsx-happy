@@ -198,7 +198,9 @@ resource "aws_ecs_task_definition" "backend" {
       environment = [
         { name = "NODE_ENV", value = "production" },
         { name = "CLOSER_SERVICE_PORT", value = "4042" },
-        { name = "CLOSER_PUBLIC_BASE_URL", value = "http://127.0.0.1:4042" },
+        # Live-view URLs the browser must resolve, so they point at Happy's public origin and
+        # arrive back through the backend's /v1/closer proxy. The Closer itself stays unroutable.
+        { name = "CLOSER_PUBLIC_BASE_URL", value = "https://${aws_cloudfront_distribution.app.domain_name}/v1/closer" },
         # A real browser in Bedrock AgentCore, using this task's role for credentials.
         { name = "CLOSER_BROWSER", value = "agentcore" },
         { name = "AWS_REGION", value = var.aws_region },

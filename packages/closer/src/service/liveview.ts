@@ -80,7 +80,9 @@ export function createLiveView(): LiveView {
 <script>
   var attemptId = ${safeJson(attemptId)};
   var c = document.getElementById('c'), ctx = c.getContext('2d'), msg = document.getElementById('msg');
-  var es = new EventSource('/v1/live/' + encodeURIComponent(attemptId) + '/stream');
+  // Relative to wherever this page is being served from, so the same page works when Happy
+  // proxies it under its own origin — an absolute path breaks the moment there is a prefix.
+  var es = new EventSource(location.pathname.replace(/\/$/, '') + '/stream');
   es.addEventListener('frame', function (e) {
     var img = new Image();
     img.onload = function () {
