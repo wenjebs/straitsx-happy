@@ -1,0 +1,18 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Postinstall scripts are quarantined by default. These six are native or
+# bundler builds that do not function without compiling:
+#   better-sqlite3  native sqlite binding (the ledger)
+#   keccak          native hashing, pulled in by viem/ethereum tooling
+#   esbuild         vite + vitest + tsx
+#   protobufjs      walletconnect transport
+#   bufferutil / utf-8-validate   optional `ws` speedups
+allowBuilds:
+  better-sqlite3: true
+  bufferutil: true
+  esbuild: true
+  keccak: true
+  protobufjs: true
+  utf-8-validate: true

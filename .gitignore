@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# local state
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# research scratch / third-party docs — not ours to republish
+research-raw.json
+StraitsX-docs.pdf
+design-doc.html
+plain-doc.html
+
+.DS_Store
+*.log
+.vscode/
+.idea/
