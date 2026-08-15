@@ -1,5 +1,5 @@
 import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
-import type { Activity, Mandate, Profile, Settings, Wallet } from "../domain.js";
+import type { Activity, Mandate, Profile, PurchaseRun, Settings, Wallet } from "../domain.js";
 import type { PurchaseClaim, Repository } from "../repository.js";
 
 export class MemoryRepository implements Repository {
@@ -9,6 +9,7 @@ export class MemoryRepository implements Repository {
   private readonly settings = new Map<string, Settings>();
   private readonly profiles = new Map<string, Profile>();
   private readonly purchaseClaims = new Map<string, string>();
+  private readonly purchaseRuns = new Map<string, PurchaseRun>();
 
   async listActivities(userId: string): Promise<Activity[]> {
     return [...this.activities.values()]
@@ -72,5 +73,14 @@ export class MemoryRepository implements Repository {
   async getPurchaseClaim(activityId: string): Promise<PurchaseClaim | null> {
     const key = this.purchaseClaims.get(activityId);
     return key ? { claimed: false, key } : null;
+  }
+
+  async getPurchaseRun(activityId: string): Promise<PurchaseRun | null> {
+    const run = this.purchaseRuns.get(activityId);
+    return run ? structuredClone(run) : null;
+  }
+
+  async putPurchaseRun(run: PurchaseRun): Promise<void> {
+    this.purchaseRuns.set(run.activityId, structuredClone(run));
   }
 }

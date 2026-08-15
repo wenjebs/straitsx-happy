@@ -5,13 +5,21 @@ import { EventHub } from "./events.js";
 import {
   type AgentProvider,
   DisabledAgentProvider,
+  LocalAgentProvider,
   RemoteAgentProvider,
 } from "./providers/agent.js";
 import {
-  DisabledPaymentProvider,
-  type PaymentProvider,
-  RemotePaymentProvider,
-} from "./providers/payment.js";
+  type CardProvider,
+  DisabledCardProvider,
+  LocalCardProvider,
+  RemoteCardProvider,
+} from "./providers/card.js";
+import {
+  DisabledPurchaseAgentProvider,
+  LocalPurchaseAgentProvider,
+  type PurchaseAgentProvider,
+  RemotePurchaseAgentProvider,
+} from "./providers/purchaseAgent.js";
 import { DynamoRepository } from "./repositories/dynamodb.js";
 import { MemoryRepository } from "./repositories/memory.js";
 import type { Repository } from "./repository.js";
@@ -21,27 +29,63 @@ import { PurchaseService } from "./services/purchases.js";
 const config = loadConfig();
 const repository: Repository = createRepository();
 const events = new EventHub();
-const agents: AgentProvider = config.AGENT_API_BASE_URL
-  ? new RemoteAgentProvider({
-      baseUrl: config.AGENT_API_BASE_URL,
-      callbackBaseUrl: config.PUBLIC_BASE_URL,
-      ...(config.AGENT_API_TOKEN ? { token: config.AGENT_API_TOKEN } : {}),
-      ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
-    })
-  : new DisabledAgentProvider();
-const payments: PaymentProvider = config.PAYMENT_API_BASE_URL
-  ? new RemotePaymentProvider({
-      baseUrl: config.PAYMENT_API_BASE_URL,
-      ...(config.PAYMENT_API_TOKEN ? { token: config.PAYMENT_API_TOKEN } : {}),
-    })
-  : new DisabledPaymentProvider();
+const agents: AgentProvider =
+  config.AGENT_MODE === "remote" && config.AGENT_API_BASE_URL
+    ? new RemoteAgentProvider({
+        baseUrl: config.AGENT_API_BASE_URL,
+        callbackBaseUrl: config.PUBLIC_BASE_URL,
+        ...(config.AGENT_API_TOKEN ? { token: config.AGENT_API_TOKEN } : {}),
+        ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
+      })
+    : config.AGENT_MODE === "local"
+      ? new LocalAgentProvider({
+          callbackBaseUrl: config.PUBLIC_BASE_URL,
+          ...(config.AGENT_CALLBACK_TOKEN ? { callbackToken: config.AGENT_CALLBACK_TOKEN } : {}),
+        })
+      : new DisabledAgentProvider();
+const cards: CardProvider =
+  config.CARD_MODE === "remote" && config.CARD_API_BASE_URL
+    ? new RemoteCardProvider({
+        baseUrl: config.CARD_API_BASE_URL,
+        ...(config.CARD_API_TOKEN ? { token: config.CARD_API_TOKEN } : {}),
+      })
+    : config.CARD_MODE === "local"
+      ? new LocalCardProvider(config.PUBLIC_BASE_URL)
+      : new DisabledCardProvider();
+const purchaseAgents: PurchaseAgentProvider =
+  config.PURCHASE_AGENT_MODE === "remote" && config.PURCHASE_AGENT_API_BASE_URL
+    ? new RemotePurchaseAgentProvider({
+        baseUrl: config.PURCHASE_AGENT_API_BASE_URL,
+        callbackBaseUrl: config.PUBLIC_BASE_URL,
+        ...(config.PURCHASE_AGENT_API_TOKEN ? { token: config.PURCHASE_AGENT_API_TOKEN } : {}),
+        ...(config.PURCHASE_CALLBACK_TOKEN
+          ? { callbackToken: config.PURCHASE_CALLBACK_TOKEN }
+          : {}),
+      })
+    : config.PURCHASE_AGENT_MODE === "local"
+      ? new LocalPurchaseAgentProvider({
+          callbackBaseUrl: config.PUBLIC_BASE_URL,
+          ...(config.PURCHASE_CALLBACK_TOKEN
+            ? { callbackToken: config.PURCHASE_CALLBACK_TOKEN }
+            : {}),
+        })
+      : new DisabledPurchaseAgentProvider();
 const activities = new ActivityService(repository, events, agents);
-const purchases = new PurchaseService(repository, events, payments, config);
-const app = createApp({ config, repository, events, agents, payments, activities, purchases });
+const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
+const app = createApp({
+  config,
+  repository,
+  events,
+  agents,
+  cards,
+  purchaseAgents,
+  activities,
+  purchases,
+});
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, ({ port }) => {
   console.log(
-    `happy-backend http://127.0.0.1:${port} store=${config.DATA_STORE} agents=${agents.mode} payments=${payments.mode}`,
+    `happy-backend http://127.0.0.1:${port} store=${config.DATA_STORE} scouts=${agents.mode} cards=${cards.mode} closer=${purchaseAgents.mode}`,
   );
 });
 

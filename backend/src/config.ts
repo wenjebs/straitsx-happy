@@ -16,16 +16,33 @@ const Env = z
     AWS_REGION: z.string().default("ap-southeast-1"),
     FRONTEND_ORIGIN: z.string().default("http://localhost:4040"),
     PUBLIC_BASE_URL: z.url().default("http://localhost:8787"),
+    AGENT_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
     AGENT_API_BASE_URL: optionalUrl,
     AGENT_API_TOKEN: optionalString,
     AGENT_CALLBACK_TOKEN: optionalString,
-    PAYMENT_API_BASE_URL: optionalUrl,
-    PAYMENT_API_TOKEN: optionalString,
+    CARD_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
+    CARD_API_BASE_URL: optionalUrl,
+    CARD_API_TOKEN: optionalString,
+    PURCHASE_AGENT_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
+    PURCHASE_AGENT_API_BASE_URL: optionalUrl,
+    PURCHASE_AGENT_API_TOKEN: optionalString,
+    PURCHASE_CALLBACK_TOKEN: optionalString,
     PAYMENT_MIN_MINOR: z.coerce.number().int().nonnegative().default(500),
     PAYMENT_MAX_MINOR: z.coerce.number().int().positive().default(3000),
     PAYMENT_ATTEMPTS_PER_LISTING: z.coerce.number().int().min(1).max(5).default(2),
   })
   .superRefine((env, ctx) => {
+    if (env.NODE_ENV === "production") {
+      for (const field of ["AGENT_MODE", "CARD_MODE", "PURCHASE_AGENT_MODE"] as const) {
+        if (env[field] === "local") {
+          ctx.addIssue({
+            code: "custom",
+            path: [field],
+            message: "cannot be local when NODE_ENV=production; configure remote or disabled",
+          });
+        }
+      }
+    }
     if (env.DATA_STORE === "dynamodb" && !env.DYNAMODB_TABLE) {
       ctx.addIssue({
         code: "custom",
@@ -33,11 +50,39 @@ const Env = z
         message: "is required when DATA_STORE=dynamodb",
       });
     }
-    if (env.AGENT_API_BASE_URL && !env.AGENT_CALLBACK_TOKEN) {
+    if (env.AGENT_MODE === "remote" && !env.AGENT_API_BASE_URL) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AGENT_API_BASE_URL"],
+        message: "is required when AGENT_MODE=remote",
+      });
+    }
+    if (env.AGENT_MODE === "remote" && !env.AGENT_CALLBACK_TOKEN) {
       ctx.addIssue({
         code: "custom",
         path: ["AGENT_CALLBACK_TOKEN"],
         message: "is required when AGENT_API_BASE_URL is configured",
+      });
+    }
+    if (env.CARD_MODE === "remote" && !env.CARD_API_BASE_URL) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CARD_API_BASE_URL"],
+        message: "is required when CARD_MODE=remote",
+      });
+    }
+    if (env.PURCHASE_AGENT_MODE === "remote" && !env.PURCHASE_AGENT_API_BASE_URL) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["PURCHASE_AGENT_API_BASE_URL"],
+        message: "is required when PURCHASE_AGENT_MODE=remote",
+      });
+    }
+    if (env.PURCHASE_AGENT_MODE === "remote" && !env.PURCHASE_CALLBACK_TOKEN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["PURCHASE_CALLBACK_TOKEN"],
+        message: "is required when PURCHASE_AGENT_MODE=remote",
       });
     }
     if (env.PAYMENT_MIN_MINOR > env.PAYMENT_MAX_MINOR) {

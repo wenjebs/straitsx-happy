@@ -11,8 +11,8 @@ session key the network itself constrains, is deferred — see the spec's
 out-of-scope section.
 
 Built for the AgentiX Playground. The concierge backend is integration-ready for
-real Scout/browser agents and real StraitsX/Closer transactions. It deliberately
-does not pretend a purchase succeeded when either external API is unconfigured.
+separate Scout, StraitsX card, and Closer browser-agent services. Its default local
+failsafe is visibly labelled, requires Sandbox mode, and cannot spend real money.
 
 - Design: [`DESIGN.md`](./DESIGN.md)
 - Non-technical walkthrough: [`PLAIN.md`](./PLAIN.md)
@@ -38,10 +38,10 @@ Check it came up:
 
 ```bash
 curl localhost:8787/v1/health
-# blockers names whichever real external APIs still need configuration
+# warnings identify the local no-money failsafes
 ```
 
-`blockers` is non-empty when `decide()` will refuse, and says why.
+`blockers` is non-empty only when a required provider is disabled.
 
 ## Scripts
 
@@ -68,7 +68,7 @@ apps/                    legacy prototypes; not used by the current runtime
 `backend/` implements the complete frontend contract and owns the safety
 decision. It stores production state in DynamoDB, sends jobs to the separately
 owned agent runtime, receives authenticated progress and livestream callbacks,
-and drives checkout through an external payment/Closer adapter. See
+issues an exact-value card, and dispatches checkout to a separate Closer agent. See
 [`backend/README.md`](./backend/README.md) for both integration protocols.
 
 `frontend/` can still run with its in-browser mock when `VITE_API_BASE_URL` is
@@ -78,10 +78,10 @@ falls back. Scout tiles embed `liveStreamUrl` from the real agent callback.
 ## Configuration
 
 One `.env` at the repo root is read by the backend. Copy `.env.example`, then add
-the external `AGENT_API_*`, `AGENT_CALLBACK_TOKEN`, and `PAYMENT_API_*` values
-when the owning teams provide them. Until then, read-only screens work and the
-health endpoint reports blockers; real workflow mutations fail clearly rather
-than substituting simulated agents or payments.
+the external `AGENT_*`, `CARD_*`, and `PURCHASE_AGENT_*` values when the owning
+teams provide them. Until then, local mode runs the complete website against
+clearly labelled Scout/card/Closer failsafes; set a provider to `disabled` if you
+want its dependent mutations to fail closed instead.
 
 Production sets `DATA_STORE=dynamodb`; local development defaults to memory.
 The full AWS deployment and two-pass image bootstrap are in

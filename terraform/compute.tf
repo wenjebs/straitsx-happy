@@ -91,8 +91,12 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "FRONTEND_ORIGIN", value = "https://${aws_cloudfront_distribution.app.domain_name}" },
       { name = "PUBLIC_BASE_URL", value = "https://${aws_cloudfront_distribution.app.domain_name}" },
+      { name = "AGENT_MODE", value = var.agent_api_base_url != "" ? "remote" : "disabled" },
       { name = "AGENT_API_BASE_URL", value = var.agent_api_base_url },
-      { name = "PAYMENT_API_BASE_URL", value = var.payment_api_base_url },
+      { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : "disabled" },
+      { name = "CARD_API_BASE_URL", value = var.card_api_base_url },
+      { name = "PURCHASE_AGENT_MODE", value = var.purchase_agent_api_base_url != "" ? "remote" : "disabled" },
+      { name = "PURCHASE_AGENT_API_BASE_URL", value = var.purchase_agent_api_base_url },
       { name = "PAYMENT_MIN_MINOR", value = tostring(var.payment_min_minor) },
       { name = "PAYMENT_MAX_MINOR", value = tostring(var.payment_max_minor) },
       { name = "PAYMENT_ATTEMPTS_PER_LISTING", value = tostring(var.payment_attempts_per_listing) }
@@ -107,8 +111,16 @@ resource "aws_ecs_task_definition" "backend" {
         valueFrom = "${aws_secretsmanager_secret.backend.arn}:AGENT_CALLBACK_TOKEN::"
       },
       {
-        name      = "PAYMENT_API_TOKEN"
-        valueFrom = "${aws_secretsmanager_secret.backend.arn}:PAYMENT_API_TOKEN::"
+        name      = "CARD_API_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.backend.arn}:CARD_API_TOKEN::"
+      },
+      {
+        name      = "PURCHASE_AGENT_API_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.backend.arn}:PURCHASE_AGENT_API_TOKEN::"
+      },
+      {
+        name      = "PURCHASE_CALLBACK_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.backend.arn}:PURCHASE_CALLBACK_TOKEN::"
       }
     ]
     logConfiguration = {

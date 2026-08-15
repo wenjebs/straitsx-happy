@@ -10,13 +10,17 @@ interface ExecutionScreenProps {
 }
 
 /**
- * The same observable language as the search screen, simpler: no video tiles.
- * Four steps per item, strictly sequential across items.
+ * Four steps per item, strictly sequential across items, with the Closer's
+ * embeddable browser stream shown whenever its callback supplies one.
  */
 export function ExecutionScreen({ activity, onNewActivity, onViewWallet }: ExecutionScreenProps) {
   const done = activity.status === "completed";
   const total = activity.shortlist.reduce((sum, p) => sum + p.listing.amountMinor, 0);
   const count = activity.shortlist.length;
+  const streamRow =
+    activity.execution.find((row) => row.state === "live" && row.liveStreamUrl) ??
+    [...activity.execution].reverse().find((row) => row.liveStreamUrl);
+  const streamItem = activity.wishlist.find((item) => item.id === streamRow?.itemId);
 
   return (
     <div className={styles.screen}>
@@ -89,6 +93,24 @@ export function ExecutionScreen({ activity, onNewActivity, onViewWallet }: Execu
           })}
         </div>
 
+        {streamRow?.liveStreamUrl && (
+          <section className={styles.stream} aria-label="Closer agent livestream">
+            <div className={styles.streamHead}>
+              <div>
+                <div className={styles.streamEyebrow}>Closer livestream</div>
+                <div className={styles.streamTitle}>{streamItem?.name ?? "Purchase agent"}</div>
+              </div>
+              <div className={styles.streamAction}>{streamRow.action ?? "working"}</div>
+            </div>
+            <iframe
+              className={styles.streamFrame}
+              src={streamRow.liveStreamUrl}
+              title={`Closer livestream for ${streamItem?.name ?? "purchase"}`}
+              allow="clipboard-read; clipboard-write"
+            />
+          </section>
+        )}
+
         <div className={styles.log}>
           <div className={styles.logEyebrow}>Agent log</div>
           <div className={styles.logLines}>
@@ -109,7 +131,7 @@ export function ExecutionScreen({ activity, onNewActivity, onViewWallet }: Execu
             <div>
               <div className={styles.doneTitle}>All {count} items purchased</div>
               <div className={styles.doneMeta}>
-                {formatMinor(total)} charged · {count} single-use cards expired · activity moved to
+                {formatMinor(total)} charged · {count} single-use cards used · activity moved to
                 Completed
               </div>
             </div>

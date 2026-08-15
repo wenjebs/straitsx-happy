@@ -28,7 +28,7 @@ export function defaultMandate(): Mandate {
 export function defaultSettings(): Settings {
   return {
     notify: true,
-    sandbox: false,
+    sandbox: true,
     region: "Singapore · SGD",
     dataRetention: "90 days",
   };

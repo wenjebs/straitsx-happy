@@ -144,6 +144,54 @@
   padding: 14px 16px;
 }
 
+.stream {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface-tile);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.streamHead {
+  min-height: 54px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.streamEyebrow {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.streamTitle {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.streamAction {
+  margin-left: auto;
+  max-width: 55%;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+
+.streamFrame {
+  display: block;
+  width: 100%;
+  height: 300px;
+  border: 0;
+  background: #0b1020;
+}
+
 .logEyebrow {
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -228,4 +276,14 @@
 
 .primary:hover {
   background: var(--hover-primary);
+}
+
+@media (max-width: 620px) {
+  .streamFrame {
+    height: 230px;
+  }
+
+  .streamAction {
+    max-width: 48%;
+  }
 }

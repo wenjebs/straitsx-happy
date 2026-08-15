@@ -51,8 +51,14 @@ variable "agent_api_base_url" {
   default     = ""
 }
 
-variable "payment_api_base_url" {
-  description = "Remote StraitsX/Closer API base URL. Leave empty until provided."
+variable "card_api_base_url" {
+  description = "Remote StraitsX card API base URL. Leave empty until provided."
+  type        = string
+  default     = ""
+}
+
+variable "purchase_agent_api_base_url" {
+  description = "Remote Closer browser-agent API base URL. Leave empty until provided."
   type        = string
   default     = ""
 }

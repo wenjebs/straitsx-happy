@@ -3,14 +3,8 @@ import { createApp } from "./app.js";
 import type { Config } from "./config.js";
 import { EventHub } from "./events.js";
 import type { AgentProvider } from "./providers/agent.js";
-import type {
-  IssueCardRequest,
-  IssuedCard,
-  PaymentProvider,
-  PlacedOrder,
-  PreparedCheckout,
-  TopUpResult,
-} from "./providers/payment.js";
+import type { CardProvider, IssueCardRequest, IssuedCard, TopUpResult } from "./providers/card.js";
+import type { PurchaseAgentProvider, PurchaseAgentRequest } from "./providers/purchaseAgent.js";
 import { MemoryRepository } from "./repositories/memory.js";
 import { ActivityService } from "./services/activities.js";
 import { PurchaseService } from "./services/purchases.js";
@@ -22,7 +16,11 @@ const config: Config = {
   AWS_REGION: "ap-southeast-1",
   FRONTEND_ORIGIN: "http://localhost:4040",
   PUBLIC_BASE_URL: "http://localhost:8787",
+  AGENT_MODE: "remote",
   AGENT_CALLBACK_TOKEN: "callback-secret",
+  CARD_MODE: "remote",
+  PURCHASE_AGENT_MODE: "remote",
+  PURCHASE_CALLBACK_TOKEN: "purchase-callback-secret",
   PAYMENT_MIN_MINOR: 500,
   PAYMENT_MAX_MINOR: 3000,
   PAYMENT_ATTEMPTS_PER_LISTING: 2,
@@ -43,33 +41,46 @@ class RecordingAgents implements AgentProvider {
   async rejectListing(): Promise<void> {}
 }
 
-class RecordingPayments implements PaymentProvider {
+class RecordingCards implements CardProvider {
   readonly mode = "remote" as const;
   async issueCard(_request: IssueCardRequest): Promise<IssuedCard> {
-    return { cardId: "card-1", last4: "1234" };
-  }
-  async prepareCheckout(): Promise<PreparedCheckout> {
-    return { checkoutId: "checkout-1", merchant: "merchant" };
-  }
-  async placeOrder(): Promise<PlacedOrder> {
-    return { orderId: "order-1" };
+    return {
+      cardId: "card-1",
+      last4: "1234",
+      agentAccess: { revealUrl: "https://cards.example/card-1", token: "secret" },
+    };
   }
   async topUp(): Promise<TopUpResult> {
     return { transactionId: "0xtopup", confirmations: 3 };
   }
 }
 
+class RecordingPurchaseAgents implements PurchaseAgentProvider {
+  readonly mode = "remote" as const;
+  async startPurchase(_request: PurchaseAgentRequest): Promise<void> {}
+}
+
 function harness() {
   const repository = new MemoryRepository();
   const events = new EventHub();
   const agents = new RecordingAgents();
-  const payments = new RecordingPayments();
+  const cards = new RecordingCards();
+  const purchaseAgents = new RecordingPurchaseAgents();
   const activities = new ActivityService(repository, events, agents);
-  const purchases = new PurchaseService(repository, events, payments, config);
+  const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
   return {
     repository,
     agents,
-    app: createApp({ config, repository, events, agents, payments, activities, purchases }),
+    app: createApp({
+      config,
+      repository,
+      events,
+      agents,
+      cards,
+      purchaseAgents,
+      activities,
+      purchases,
+    }),
   };
 }
 

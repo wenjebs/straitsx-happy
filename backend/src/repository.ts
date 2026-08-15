@@ -1,4 +1,4 @@
-import type { Activity, Mandate, Profile, Settings, Wallet } from "./domain.js";
+import type { Activity, Mandate, Profile, PurchaseRun, Settings, Wallet } from "./domain.js";
 
 export interface PurchaseClaim {
   claimed: boolean;
@@ -21,4 +21,6 @@ export interface Repository {
   /** One immutable purchase lock per activity, also serving idempotency. */
   getPurchaseClaim(activityId: string): Promise<PurchaseClaim | null>;
   claimPurchase(activityId: string, idempotencyKey: string): Promise<PurchaseClaim>;
+  getPurchaseRun(activityId: string): Promise<PurchaseRun | null>;
+  putPurchaseRun(run: PurchaseRun): Promise<void>;
 }

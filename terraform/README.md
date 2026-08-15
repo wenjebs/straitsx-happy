@@ -35,13 +35,15 @@ terraform apply
 The first apply leaves `deploy_backend=false`. It creates the ECR repository and secret before an
 image or secret value is needed.
 
-Populate the secret with all three JSON keys. Use real random values—never commit this file:
+Populate the secret with all five JSON keys. Use real random values—never commit this file:
 
 ```json
 {
   "AGENT_API_TOKEN": "replace-with-agent-api-token",
   "AGENT_CALLBACK_TOKEN": "replace-with-a-long-random-value",
-  "PAYMENT_API_TOKEN": "replace-with-payment-api-token"
+  "CARD_API_TOKEN": "replace-with-straitsx-card-api-token",
+  "PURCHASE_AGENT_API_TOKEN": "replace-with-closer-api-token",
+  "PURCHASE_CALLBACK_TOKEN": "replace-with-a-second-long-random-value"
 }
 ```
 
@@ -70,7 +72,8 @@ terraform -chdir=terraform apply `
   -var='deploy_backend=true' `
   -var="backend_image=$image" `
   -var='agent_api_base_url=https://agent-api.example' `
-  -var='payment_api_base_url=https://payment-api.example'
+  -var='card_api_base_url=https://card-api.example' `
+  -var='purchase_agent_api_base_url=https://closer-api.example'
 ```
 
 Use an image digest rather than a mutable tag for production once the workflow publishes one.

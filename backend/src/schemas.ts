@@ -122,3 +122,37 @@ export const AgentCallbackEvent = z.discriminatedUnion("type", [
 ]);
 
 export type AgentCallback = z.infer<typeof AgentCallbackEvent>;
+
+const PurchaseEventBase = z.object({
+  eventId: z.string().min(1).max(160),
+  attemptId: z.string().min(1).max(160),
+  itemId: z.string().min(1).max(100),
+});
+
+export const PurchaseAgentCallbackEvent = z.discriminatedUnion("type", [
+  PurchaseEventBase.extend({
+    type: z.literal("browser.started"),
+    liveStreamUrl: z.url(),
+    message: z.string().min(1).max(2000).optional(),
+  }),
+  PurchaseEventBase.extend({
+    type: z.literal("checkout.prepared"),
+    message: z.string().min(1).max(2000).optional(),
+  }),
+  PurchaseEventBase.extend({
+    type: z.literal("order.placing"),
+    message: z.string().min(1).max(2000).optional(),
+  }),
+  PurchaseEventBase.extend({
+    type: z.literal("order.confirmed"),
+    orderId: z.string().min(1).max(240),
+    message: z.string().min(1).max(2000).optional(),
+  }),
+  PurchaseEventBase.extend({
+    type: z.literal("purchase.failed"),
+    message: z.string().min(1).max(2000),
+    retryable: z.boolean().default(true),
+  }),
+]);
+
+export type PurchaseAgentCallback = z.infer<typeof PurchaseAgentCallbackEvent>;

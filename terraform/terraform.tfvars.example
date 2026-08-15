@@ -7,8 +7,9 @@ aws_region   = "ap-southeast-1"
 deploy_backend = false
 backend_image  = ""
 
-agent_api_base_url   = ""
-payment_api_base_url = ""
+agent_api_base_url          = ""
+card_api_base_url           = ""
+purchase_agent_api_base_url = ""
 
 payment_min_minor  = 500
 payment_max_minor  = 3000

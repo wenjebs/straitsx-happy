@@ -10,7 +10,7 @@ import {
   QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { defaultMandate, defaultProfile, defaultSettings, defaultWallet } from "../defaults.js";
-import type { Activity, Mandate, Profile, Settings, Wallet } from "../domain.js";
+import type { Activity, Mandate, Profile, PurchaseRun, Settings, Wallet } from "../domain.js";
 import type { PurchaseClaim, Repository } from "../repository.js";
 
 interface Stored<T> {
@@ -128,6 +128,20 @@ export class DynamoRepository implements Repository {
   async getPurchaseClaim(activityId: string): Promise<PurchaseClaim | null> {
     const existing = await this.get<{ key: string }>(`PURCHASE#${activityId}`, "LOCK");
     return existing ? { claimed: false, key: existing.key } : null;
+  }
+
+  async getPurchaseRun(activityId: string): Promise<PurchaseRun | null> {
+    const stored = await this.get<Stored<PurchaseRun>>(`ACTIVITY#${activityId}`, "PURCHASE");
+    return stored?.data ?? null;
+  }
+
+  async putPurchaseRun(run: PurchaseRun): Promise<void> {
+    await this.put<Stored<PurchaseRun>>({
+      pk: `ACTIVITY#${run.activityId}`,
+      sk: "PURCHASE",
+      entity: "purchase-run",
+      data: run,
+    });
   }
 
   private async getState<T>(userId: string, key: string, fallback: () => T): Promise<T> {

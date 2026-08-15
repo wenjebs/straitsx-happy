@@ -49,7 +49,7 @@ resource "aws_dynamodb_table" "happy" {
 
 resource "aws_secretsmanager_secret" "backend" {
   name                    = "${local.name}/backend"
-  description             = "Agent callback, agent API and payment API tokens for Happy"
+  description             = "Scout, StraitsX card and Closer API/callback tokens for Happy"
   recovery_window_in_days = 7
 
   tags = local.common_tags

@@ -1,89 +1,96 @@
 # Happy backend
 
-The real HTTP/SSE backend for `frontend/`. It implements every route in
-[`frontend/BACKEND_CONTRACT.md`](../frontend/BACKEND_CONTRACT.md), stores durable state in
-Amazon DynamoDB in production, dispatches real work to an external agent runtime, and delegates
-card reveal/merchant automation to a real payment/Closer service.
+The Hono HTTP/SSE backend for `frontend/`. It owns the mandate and wallet, stores durable state
+in DynamoDB in production, and orchestrates three deliberately separate integrations:
 
-There is deliberately no fake purchase fallback. `/v1/health` reports
-`AGENT_API_NOT_CONFIGURED` or `PAYMENT_API_NOT_CONFIGURED`, and affected mutations return a
-readable `503`, until the corresponding API URL is configured.
+1. **Scout agent** — plans the wishlist, searches listings, and supplies search livestreams.
+2. **StraitsX card provider** — issues an exact-value, single-use card capability.
+3. **Closer purchase agent** — opens one approved listing, obtains the card through that
+   short-lived capability, checks out, and reports milestones plus its livestream.
+
+The backend never persists a PAN or card capability token. Purchases are sequential, callback
+events are deduplicated, stale attempt callbacks are rejected, and a retry gets a newly issued
+card. Wallet funds move only after `order.confirmed`.
 
 ## Run locally
 
 ```powershell
 Copy-Item .env.example .env
-# Add the agent/payment URLs and tokens when available.
 $env:COREPACK_INTEGRITY_KEYS='0' # only needed by older Corepack builds
 corepack pnpm install
 corepack pnpm dev
 ```
 
-The default `DATA_STORE=memory` is process-local development storage. To use DynamoDB Local or
-AWS DynamoDB, set:
+The defaults use `memory` storage and `local` mode for all three providers. This is an explicit
+failsafe walkthrough: it sends real callbacks, SSE frames, execution steps, and livestream URLs,
+but every stream says `LOCAL FAILSAFE` and no browser or payment is real. Local card and Closer
+operations refuse to run unless Settings has Sandbox enabled.
+
+To connect the real services later:
 
 ```dotenv
-DATA_STORE=dynamodb
-DYNAMODB_TABLE=happy-dev-data
-AWS_REGION=ap-southeast-1
-# Optional for DynamoDB Local only:
-DYNAMODB_ENDPOINT=http://localhost:8000
+AGENT_MODE=remote
+AGENT_API_BASE_URL=https://scouts.example
+AGENT_API_TOKEN=...
+AGENT_CALLBACK_TOKEN=...
+
+CARD_MODE=remote
+CARD_API_BASE_URL=https://cards.example
+CARD_API_TOKEN=...
+
+PURCHASE_AGENT_MODE=remote
+PURCHASE_AGENT_API_BASE_URL=https://closer.example
+PURCHASE_AGENT_API_TOKEN=...
+PURCHASE_CALLBACK_TOKEN=...
 ```
 
-## Agent API Happy calls
+Set any mode to `disabled` to make its dependent mutation return a readable `503`.
 
-All calls are JSON `POST`s. If `AGENT_API_TOKEN` is set, Happy sends
-`Authorization: Bearer <token>`.
+## Scout API Happy calls
+
+All requests are JSON `POST`s and include a callback `{ url, token }`.
 
 | Path | Purpose |
 |---|---|
-| `/v1/runs/plan` | Decompose the goal into a wishlist and clarifications. |
-| `/v1/runs/search` | Start two Scouts per item, five items concurrently. |
-| `/v1/runs/:activityId/pause` | Pause browsers without losing the run. |
-| `/v1/runs/:activityId/resume` | Resume browsers. |
-| `/v1/runs/:activityId/reject` | Find a replacement for a rejected pick. |
+| `/v1/runs/plan` | Decompose the goal into wishlist items and clarifications. |
+| `/v1/runs/search` | Start two Scouts per item and find candidate listings. |
+| `/v1/runs/:activityId/pause` | Pause browser sessions. |
+| `/v1/runs/:activityId/resume` | Resume browser sessions. |
+| `/v1/runs/:activityId/reject` | Replace a rejected pick. |
 
-The plan/search request contains a callback object:
+The callback is `POST /v1/integrations/agents/:activityId/events`. Accepted events are
+`wishlist.ready`, `item.progress`, `agent.update`, `shortlist.ready`, `message.appended`, and
+`run.failed`. Payload schemas are in [`src/schemas.ts`](./src/schemas.ts).
 
-```json
-{
-  "callback": {
-    "url": "https://<happy-host>/v1/integrations/agents/<activityId>/events",
-    "token": "shared-callback-token"
-  }
-}
-```
+## StraitsX card API Happy calls
 
-The agent runtime posts one event at a time to that URL using either
-`Authorization: Bearer <token>` or `x-happy-callback-token: <token>`. Accepted event types are:
-
-- `wishlist.ready` — title, reply, editable wishlist, estimate, and 0–10 clarifications.
-- `item.progress` — the item stage movement. Happy derives the trustworthy `previousStage` from
-  persisted state and drops redundant movements.
-- `agent.update` — Scout id/item/slot/stage/action/current URL and optional `liveStreamUrl`.
-- `shortlist.ready` — one pick per item plus ranked `alternates` for safe fallback.
-- `message.appended` — an additional user-visible agent message.
-- `run.failed` — terminal human-readable failure.
-
-Exact payload validation lives in [`src/schemas.ts`](./src/schemas.ts). A stream URL is rendered
-inside a sandboxed iframe; its server must permit embedding through CSP `frame-ancestors` and must
-not send an incompatible `X-Frame-Options` header.
-
-## Payment/Closer API Happy calls
-
-If `PAYMENT_API_TOKEN` is set, Happy sends it as a bearer token. The remote service must honor
-every supplied idempotency key.
-
-| Method/path | Required response | Actual milestone |
+| Path | Request purpose | Required response |
 |---|---|---|
-| `POST /v1/cards` | `{ "cardId": "...", "last4": "1234" }` | Exact-value card issued. |
-| `POST /v1/checkouts` | `{ "checkoutId": "...", "merchant": "..." }` | Cart and payment details prepared. |
-| `POST /v1/checkouts/:id/place` | `{ "orderId": "..." }` | Merchant confirmed the order. |
-| `POST /v1/wallet/topups` | `{ "transactionId": "...", "confirmations": 3 }` | XSGD top-up confirmed. |
+| `POST /v1/cards` | Issue the exact listing amount after mandate checks. | `{ cardId, last4, agentAccess: { revealUrl, token, expiresAt? } }` |
+| `POST /v1/wallet/topups` | Confirm an XSGD wallet top-up. | `{ transactionId, confirmations }` |
 
-Happy never receives a full PAN. Before the first provider call it enforces the mandate, wallet
-balance, category rules, and configured card rail band. It purchases strictly sequentially. An
-alternate must be at or below the price the user confirmed; a higher-priced alternate is skipped.
+`agentAccess` must be short-lived and single-use. Happy passes it directly to Closer and does not
+store the token.
+
+## Closer API Happy calls
+
+Happy sends `POST /v1/purchase-runs` with `activityId`, `attemptId`, the exact selected listing,
+the item, sandbox flag, idempotency key, card metadata/capability, and a callback `{ url, token }`.
+An accepted response only means the asynchronous job was queued.
+
+Closer posts one event at a time to
+`POST /v1/integrations/purchases/:activityId/events`:
+
+| Event | Extra fields | Meaning |
+|---|---|---|
+| `browser.started` | `liveStreamUrl`, `message?` | Listing is open; frontend embeds the stream. |
+| `checkout.prepared` | `message?` | Cart and payment fields are ready. |
+| `order.placing` | `message?` | Final merchant submission began. |
+| `order.confirmed` | `orderId`, `message?` | Merchant confirmed; Happy records the debit. |
+| `purchase.failed` | `message`, `retryable` | Happy expires the card and safely retries/falls back. |
+
+Every event also includes unique `eventId`, current `attemptId`, and `itemId`. The callback token
+is sent as `Authorization: Bearer <token>` or `x-happy-callback-token`.
 
 ## DynamoDB access patterns
 
@@ -93,8 +100,9 @@ Production uses one table:
 |---|---|
 | Activity by id | `pk=ACTIVITY#<id>`, `sk=META` |
 | Activities by user/date | `gsi1pk=USER#<id>`, `gsi1sk=<createdAt>#<id>` |
+| Purchase state-machine cursor | `pk=ACTIVITY#<id>`, `sk=PURCHASE` |
 | Wallet/mandate/settings/profile | `pk=USER#<id>`, `sk=<type>` |
-| One purchase/idempotency lock | `pk=PURCHASE#<activityId>`, `sk=LOCK` |
+| Purchase/idempotency lock | `pk=PURCHASE#<activityId>`, `sk=LOCK` |
 
-The purchase lock is a conditional write. Repeating the same key returns the existing execution;
-a different key cannot start another purchase.
+The conditional purchase lock makes a repeated key return the existing execution and prevents a
+different key from starting another purchase.

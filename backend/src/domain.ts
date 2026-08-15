@@ -71,6 +71,24 @@ export interface ExecutionRow {
   itemId: string;
   step: number;
   state: "queued" | "live" | "purchased";
+  action?: string | undefined;
+  liveStreamUrl?: string | undefined;
+}
+
+/** Durable cursor for the asynchronous Closer-agent purchase state machine. */
+export interface PurchaseRun {
+  activityId: string;
+  userId: string;
+  idempotencyKey: string;
+  status: "running" | "completed" | "failed";
+  itemIndex: number;
+  candidateIndex: number;
+  attemptIndex: number;
+  attemptId?: string | undefined;
+  cardId?: string | undefined;
+  cardLast4?: string | undefined;
+  processedEventIds: string[];
+  updatedAt: string;
 }
 
 export interface LogLine {

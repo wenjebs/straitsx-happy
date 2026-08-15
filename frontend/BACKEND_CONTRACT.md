@@ -151,7 +151,9 @@ Every activity endpoint returns this. Optional fields may be omitted.
   ],
 
   "execution": [
-    { "itemId": "gpu", "step": 4, "state": "purchased" }
+    { "itemId": "gpu", "step": 2, "state": "live",
+      "action": "bizgram-asia/checkout · autofill ok",
+      "liveStreamUrl": "https://closer.example/streams/attempt-1" }
   ],
 
   "log": [
@@ -173,6 +175,8 @@ Every activity endpoint returns this. Optional fields may be omitted.
 | `agents[].action` | Free text, shown verbatim under the tile. Suggested: `crawling listing pages`, `reading spec table`, `pulling seller history`, `diffing 6 candidates`, `locked candidate`, `waiting for a slot`. |
 | `agents[].liveStreamUrl` | Optional embeddable URL for the Scout's live browser viewport. The frontend renders it in a sandboxed iframe. Until supplied, the tile says it is waiting for the stream; there is no simulated page animation. The stream server must permit framing via its CSP / `X-Frame-Options` policy. |
 | `execution[].step` | `0` queued, `1-3` in flight, `4` purchased. Drives a progress fill at `step/4`. |
+| `execution[].action` | Optional current Closer status, shown above its livestream. |
+| `execution[].liveStreamUrl` | Optional embeddable Closer browser stream. It is rendered on the execution screen and must permit framing. |
 | `messages[].card` | Which in-chat card renders under the text. `thinking` \| `wishlist` \| `curator` \| `locked`. Omit for plain text. |
 | `imageUrl` | Optional on listings and curator options. When present the frontend renders it in place of the striped placeholder, same box size and radius. |
 
@@ -258,7 +262,7 @@ Card `status` follows the lifecycle `issued → viewed → used → expired`.
 }
 
 // Settings
-{ "notify": true, "sandbox": false, "region": "Singapore · SGD", "dataRetention": "90 days" }
+{ "notify": true, "sandbox": true, "region": "Singapore · SGD", "dataRetention": "90 days" }
 
 // Profile
 { "name": "Tricia Lim", "email": "tricia.lim@hey.sg", "initials": "TL",
@@ -370,6 +374,8 @@ What the backend must do:
   it holds.
 - Drive execution strictly sequentially: four steps per item, one item at a time,
   emitting `exec.step` and `log.line` as each actually happens.
+- Treat the browser purchase as asynchronous: accept Closer callbacks, reject stale
+  `attemptId`s, deduplicate `eventId`s, and debit only after `order.confirmed`.
 - On completion emit `activity.completed` **and** `wallet.updated`, so the
   balance and the feed card update without a refetch.
 

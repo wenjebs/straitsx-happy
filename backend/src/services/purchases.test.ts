@@ -2,34 +2,34 @@ import { describe, expect, it } from "vitest";
 import type { Activity } from "../domain.js";
 import { DEFAULT_USER_ID } from "../domain.js";
 import { EventHub } from "../events.js";
-import type {
-  IssueCardRequest,
-  IssuedCard,
-  PaymentProvider,
-  PlacedOrder,
-  PreparedCheckout,
-  TopUpResult,
-} from "../providers/payment.js";
+import type { CardProvider, IssueCardRequest, IssuedCard, TopUpResult } from "../providers/card.js";
+import type { PurchaseAgentProvider, PurchaseAgentRequest } from "../providers/purchaseAgent.js";
 import { MemoryRepository } from "../repositories/memory.js";
 import { PurchaseService } from "./purchases.js";
 
-class Payments implements PaymentProvider {
+class Cards implements CardProvider {
   readonly mode = "remote" as const;
   issued = 0;
 
   async issueCard(request: IssueCardRequest): Promise<IssuedCard> {
     this.issued += 1;
     expect(request.listing.amountMinor).toBe(2500);
-    return { cardId: "card-1", last4: "1234" };
-  }
-  async prepareCheckout(): Promise<PreparedCheckout> {
-    return { checkoutId: "checkout-1", merchant: "Demo Store" };
-  }
-  async placeOrder(): Promise<PlacedOrder> {
-    return { orderId: "SG-1" };
+    return {
+      cardId: "card-1",
+      last4: "1234",
+      agentAccess: { revealUrl: "https://cards.example/card-1", token: "secret" },
+    };
   }
   async topUp(): Promise<TopUpResult> {
     return { transactionId: "tx", confirmations: 1 };
+  }
+}
+
+class PurchaseAgents implements PurchaseAgentProvider {
+  readonly mode = "remote" as const;
+  requests: PurchaseAgentRequest[] = [];
+  async startPurchase(request: PurchaseAgentRequest): Promise<void> {
+    this.requests.push(request);
   }
 }
 
@@ -89,11 +89,34 @@ async function eventuallyCompleted(repository: MemoryRepository): Promise<Activi
   throw new Error("purchase did not complete");
 }
 
+async function finishPurchase(service: PurchaseService, agents: PurchaseAgents): Promise<void> {
+  for (let attempt = 0; attempt < 50 && agents.requests.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const request = agents.requests[0];
+  if (!request) throw new Error("purchase agent did not receive a job");
+  await service.handleAgentEvent(request.activityId, {
+    type: "browser.started",
+    eventId: "event-browser",
+    attemptId: request.attemptId,
+    itemId: request.item.id,
+    liveStreamUrl: "https://streams.example/closer",
+  });
+  await service.handleAgentEvent(request.activityId, {
+    type: "order.confirmed",
+    eventId: "event-confirmed",
+    attemptId: request.attemptId,
+    itemId: request.item.id,
+    orderId: "SG-1",
+  });
+}
+
 describe("PurchaseService", () => {
   it("enforces the card rail before issuing and leaves a denied activity retryable", async () => {
     const repository = new MemoryRepository();
-    const payments = new Payments();
-    const service = new PurchaseService(repository, new EventHub(), payments, {
+    const cards = new Cards();
+    const agents = new PurchaseAgents();
+    const service = new PurchaseService(repository, new EventHub(), cards, agents, {
       PAYMENT_MIN_MINOR: 500,
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,
@@ -104,7 +127,7 @@ describe("PurchaseService", () => {
     await expect(service.start(expensive.id, "idempotency-expensive")).rejects.toThrow(
       "outside the issuable range",
     );
-    expect(payments.issued).toBe(0);
+    expect(cards.issued).toBe(0);
     expect(await repository.getPurchaseClaim(expensive.id)).toBeNull();
 
     const pick = expensive.shortlist[0];
@@ -114,24 +137,29 @@ describe("PurchaseService", () => {
     expensive.totalMinor = 2500;
     await repository.putActivity(expensive);
     await service.start(expensive.id, "idempotency-valid");
+    await finishPurchase(service, agents);
     const completed = await eventuallyCompleted(repository);
-    expect(completed.execution[0]).toEqual({ itemId: "item-1", step: 4, state: "purchased" });
-    expect(payments.issued).toBe(1);
+    expect(completed.execution[0]).toEqual(
+      expect.objectContaining({ itemId: "item-1", step: 4, state: "purchased" }),
+    );
+    expect(cards.issued).toBe(1);
   });
 
   it("returns an existing execution for the same idempotency key", async () => {
     const repository = new MemoryRepository();
-    const payments = new Payments();
-    const service = new PurchaseService(repository, new EventHub(), payments, {
+    const cards = new Cards();
+    const agents = new PurchaseAgents();
+    const service = new PurchaseService(repository, new EventHub(), cards, agents, {
       PAYMENT_MIN_MINOR: 500,
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,
     });
     await repository.putActivity(activity(2500));
     await service.start("activity-1", "same-idempotency-key");
+    await finishPurchase(service, agents);
     await eventuallyCompleted(repository);
     const duplicate = await service.start("activity-1", "same-idempotency-key");
     expect(duplicate.status).toBe("completed");
-    expect(payments.issued).toBe(1);
+    expect(cards.issued).toBe(1);
   });
 });

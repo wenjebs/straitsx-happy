@@ -117,6 +117,10 @@ export interface ExecutionRow {
   /** 0 queued, 1-3 in flight, 4 purchased. */
   step: number;
   state: "queued" | "live" | "purchased";
+  /** Current Closer status text supplied by the backend callback. */
+  action?: string;
+  /** Embeddable live browser stream supplied by the Closer agent. */
+  liveStreamUrl?: string;
 }
 
 export interface LogLine {
@@ -350,9 +354,8 @@ export function rejectPick(id: string, itemId: string): Promise<Activity> {
 }
 
 /**
- * Begins checkout. On the live rail this issues real single-use cards and
- * spends real money, so it is deliberately not retried anywhere in this client
- * and the UI confirms before calling it.
+ * Begins checkout. The backend enforces sandbox/remote provider mode and owns
+ * all retries, so it is deliberately not retried anywhere in this client.
  *
  * `idempotencyKey` lets the backend collapse a duplicate submission (double
  * click, refresh mid-flight) into one execution rather than two.
