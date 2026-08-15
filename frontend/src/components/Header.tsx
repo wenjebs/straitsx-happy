@@ -1,0 +1,38 @@
+import styles from "./Header.module.css";
+import { ChevronLeftIcon } from "./Icons";
+
+interface HeaderProps {
+  title: string;
+  meta: string;
+  showBack: boolean;
+  onBack: () => void;
+  onProfile: () => void;
+}
+
+export function Header({ title, meta, showBack, onBack, onProfile }: HeaderProps) {
+  return (
+    <header className={styles.header}>
+      {showBack && (
+        <button type="button" className={styles.back} onClick={onBack}>
+          <ChevronLeftIcon />
+          <span>Back</span>
+        </button>
+      )}
+      <div className={styles.titleWrap}>
+        <div className={styles.title}>{title}</div>
+      </div>
+      <div className={styles.meta}>{meta}</div>
+      <div className={styles.right}>
+        <button
+          type="button"
+          className={styles.avatarButton}
+          onClick={onProfile}
+          title="Profile"
+          aria-label="Profile"
+        >
+          <span className={styles.avatar}>TL</span>
+        </button>
+      </div>
+    </header>
+  );
+}

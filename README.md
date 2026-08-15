@@ -58,6 +58,7 @@ curl localhost:8787/v1/health
 apps/
   api/            :8787  hono + zod + better-sqlite3 + viem
   demo-store/     :4030  hono
+frontend/         :4040  vite + react, the Happy concierge UI
 packages/
   pay/                   mandates, decide(), ledger, x402 client, issuer adapter
   shared/                wire schemas, chain constants, money units
@@ -71,8 +72,12 @@ buy nothing. The mock issuer lives behind an `IssuerAdapter` inside
 
 `apps/api` is currently just a health endpoint and the zod boot-time env
 validation. The HTTP wrapper over `packages/pay` is deferred; it's about 40
-lines over the same functions if something ends up needing it. The user-facing
-chat UI lives in a separate repo.
+lines over the same functions if something ends up needing it.
+
+`frontend/` is the concierge UI, built from the design handoff in
+`design_handoff_happy_concierge/`. It runs entirely on mock data and timers —
+no backend calls yet — so it starts and demos without the API. Run it with
+`pnpm dev:frontend`; `pnpm dev` still starts only the services under `apps/`.
 
 ## Configuration
 

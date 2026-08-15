@@ -1,0 +1,45 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+  flex: none;
+}
+
+/*
+ * The inactive border is transparent rather than absent so nothing shifts
+ * when a group becomes active.
+ */
+.group {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  background: none;
+}
+
+.active {
+  border-color: #d7d7db;
+  background: var(--surface-muted);
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-disabled);
+}
+
+.reached {
+  color: var(--text-tertiary);
+}
+
+.current {
+  color: var(--text-primary);
+}

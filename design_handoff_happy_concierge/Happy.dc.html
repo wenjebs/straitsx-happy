@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#ffffff;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#101012;text-decoration:none}
+a:hover{color:#5b5b64}
+button{font:inherit;cursor:pointer}
+input,textarea{font:inherit}
+:focus-visible{outline:2px solid #101012;outline-offset:2px}
+::placeholder{color:#9a9aa2}
+@keyframes h-scroll{0%{transform:translateY(0)}100%{transform:translateY(-50%)}}
+@keyframes h-shimmer{0%,100%{opacity:.35}50%{opacity:.85}}
+@keyframes h-blink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes h-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes h-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(220%)}}
+@media (prefers-reduced-motion: reduce){*{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+</style>
+</helmet>
+<div style="display:flex;height:100vh;width:100%;overflow:hidden;background:#ffffff;color:#101012;font-family:'Instrument Sans',system-ui,sans-serif;font-size:14px;line-height:1.45">
+
+  <aside style="{{ sidebarStyle }}">
+    <div style="display:flex;align-items:center;gap:9px;height:56px;padding:0 14px;border-bottom:1px solid #ececee">
+      <div style="width:20px;height:20px;border-radius:5px;background:#101012;flex:none"></div>
+      <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+        <span style="font-weight:600;letter-spacing:-0.01em">Happy</span>
+      </sc-if>
+    </div>
+    <nav style="display:flex;flex-direction:column;gap:2px;padding:10px 8px">
+      <button onClick="{{ goPurchase }}" style="{{ navPurchase }}">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 5.5h12l-1 8H3l-1-8Z"></path><path d="M5.5 5.5V4a2.5 2.5 0 0 1 5 0v1.5"></path></svg>
+        <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}"><span>Purchase</span></sc-if>
+      </button>
+      <button onClick="{{ goWallet }}" style="{{ navWallet }}">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.8" y="3.8" width="12.4" height="8.4" rx="1.6"></rect><path d="M1.8 6.6h12.4"></path></svg>
+        <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}"><span>Wallet</span></sc-if>
+      </button>
+      <button onClick="{{ goMandate }}" style="{{ navMandate }}">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8 13.2 4v4.2c0 3-2.2 5-5.2 6-3-1-5.2-3-5.2-6V4L8 1.8Z"></path></svg>
+        <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}"><span>Mandate</span></sc-if>
+      </button>
+      <button onClick="{{ goSettings }}" style="{{ navSettings }}">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.3"></circle><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2"></path></svg>
+        <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}"><span>Settings</span></sc-if>
+      </button>
+    </nav>
+    <div style="margin-top:auto;padding:10px 8px;border-top:1px solid #ececee">
+      <button onClick="{{ toggleSidebar }}" title="Collapse sidebar" style="display:flex;align-items:center;gap:10px;width:100%;padding:8px 9px;border:none;background:none;border-radius:6px;color:#6b6b73;font-size:13px" style-hover="background:#f4f4f5;color:#101012">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="1.6"></rect><path d="M6.2 3v10"></path></svg>
+        <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}"><span>Collapse</span></sc-if>
+      </button>
+    </div>
+  </aside>
+
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;background:#ffffff">
+    <header style="display:flex;align-items:center;gap:16px;height:56px;padding:0 20px;border-bottom:1px solid #ececee;flex:none">
+      <sc-if value="{{ showBack }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ back }}" style="display:flex;align-items:center;gap:6px;padding:5px 10px 5px 8px;border:1px solid #e3e3e6;border-radius:6px;background:#fff;font-size:12.5px;color:#3f3f47;flex:none" style-hover="border-color:#101012;color:#101012">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 3.5 5 8l4.5 4.5"></path></svg>
+          <span>Back</span>
+        </button>
+      </sc-if>
+      <div style="min-width:0">
+        <div style="font-weight:500;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ headerTitle }}</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9a9aa2;white-space:nowrap">{{ headerMeta }}</div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:14px">
+        <button onClick="{{ goProfile }}" title="Profile" style="display:flex;align-items:center;gap:8px;border:none;background:none;padding:0">
+          <span style="width:28px;height:28px;border-radius:50%;background:#101012;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:600;letter-spacing:0.02em">TL</span>
+        </button>
+      </div>
+    </header>
+
+    <sc-if value="{{ showStageBar }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:9px 18px;border-bottom:1px solid #ececee;background:#fdfdfe;flex:none">
+        <sc-for list="{{ stageBar }}" as="g" hint-placeholder-count="5">
+          <button onClick="{{ g.go }}" style="{{ g.btn }}">
+            <span style="display:flex;gap:2px">
+              <sc-for list="{{ g.chevs }}" as="cv" hint-placeholder-count="8">
+                <span style="{{ cv.style }}"></span>
+              </sc-for>
+            </span>
+            <span style="{{ g.label }}">{{ g.name }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </sc-if>
+    <div style="flex:1;min-height:0;display:flex">
+      <section style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
+
+        <sc-if value="{{ isChat }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:28px 0 8px">
+            <div style="max-width:720px;margin:0 auto;padding:0 28px">
+              <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ true }}">
+                <div style="padding:56px 0 24px;text-align:center">
+                  <h1 style="margin:0 0 8px;font-size:26px;font-weight:600;letter-spacing:-0.025em">What should we buy today?</h1>
+                  <p style="margin:0 0 26px;color:#6b6b73;font-size:14px;text-wrap:pretty">Hand over a list, or describe the outcome you want. Agents research, compare and check out with a single-use card.</p>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
+                    <sc-for list="{{ prompts }}" as="p" hint-placeholder-count="3">
+                      <button onClick="{{ p.use }}" style="padding:7px 12px;border:1px solid #e3e3e6;border-radius:999px;background:#fff;font-size:12.5px;color:#3f3f47" style-hover="background:#f7f7f8;border-color:#d3d3d8">{{ p.text }}</button>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-for list="{{ msgs }}" as="m" hint-placeholder-count="2">
+                <div style="margin-bottom:22px;animation:h-in 260ms ease both">
+                  <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;justify-content:flex-end">
+                      <div style="max-width:76%;padding:10px 14px;border-radius:14px 14px 4px 14px;background:#101012;color:#fff;font-size:14px">{{ m.text }}</div>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{ m.isBot }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;gap:12px">
+                      <span style="width:22px;height:22px;border-radius:6px;background:#101012;flex:none;margin-top:1px"></span>
+                      <div style="min-width:0;flex:1">
+                        <div style="color:#101012;font-size:14px;text-wrap:pretty">{{ m.text }}</div>
+
+                        <sc-if value="{{ m.isThinking }}" hint-placeholder-val="{{ false }}">
+                          <div style="display:flex;align-items:center;gap:7px;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9a9aa2">
+                            <span style="width:6px;height:6px;border-radius:50%;background:#101012;animation:h-blink 1s ease-in-out infinite"></span>
+                            <span>{{ m.thinkingLabel }}</span>
+                          </div>
+                        </sc-if>
+
+                        <sc-if value="{{ m.isWishlist }}" hint-placeholder-val="{{ false }}">
+                          <div style="margin-top:14px;border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid #ececee;background:#fafafa">
+                              <span style="font-size:12.5px;font-weight:600;letter-spacing:-0.01em">Proposed wishlist</span>
+                              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#6b6b73">{{ wishlistBudget }}</span>
+                            </div>
+                            <sc-for list="{{ wishlist }}" as="w" hint-placeholder-count="6">
+                              <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid #f2f2f3">
+                                <span style="{{ w.dot }}"></span>
+                                <div style="min-width:0;flex:1">
+                                  <div style="font-size:13.5px;font-weight:500">{{ w.name }}</div>
+                                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9a9aa2">{{ w.spec }}</div>
+                                </div>
+                                <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#3f3f47">{{ w.budget }}</span>
+                                <sc-if value="{{ editing }}" hint-placeholder-val="{{ false }}">
+                                  <button onClick="{{ w.remove }}" title="Remove" style="border:1px solid #e3e3e6;background:#fff;border-radius:5px;width:22px;height:22px;line-height:1;color:#6b6b73" style-hover="border-color:#101012;color:#101012">×</button>
+                                </sc-if>
+                              </div>
+                            </sc-for>
+                            <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fafafa">
+                              <sc-if value="{{ editing }}" hint-placeholder-val="{{ false }}">
+                                <input value="{{ newItem }}" onChange="{{ onNewItem }}" onKeyDown="{{ onNewItemKey }}" placeholder="Add an item, e.g. 240mm AIO cooler" style="flex:1;min-width:0;padding:7px 10px;border:1px solid #e3e3e6;border-radius:6px;background:#fff;font-size:12.5px">
+                                <button onClick="{{ addItem }}" style="padding:7px 12px;border:1px solid #d3d3d8;border-radius:6px;background:#fff;font-size:12.5px">Add</button>
+                              </sc-if>
+                              <button onClick="{{ toggleEditing }}" style="padding:7px 12px;border:1px solid #d3d3d8;border-radius:6px;background:#fff;font-size:12.5px;color:#3f3f47">{{ editLabel }}</button>
+                              <button onClick="{{ approveWishlist }}" style="margin-left:auto;padding:8px 16px;border:none;border-radius:6px;background:#101012;color:#fff;font-size:12.5px;font-weight:500" style-hover="background:#2c2c31">Approve &amp; continue</button>
+                            </div>
+                          </div>
+                        </sc-if>
+
+                        <sc-if value="{{ m.isCurator }}" hint-placeholder-val="{{ false }}">
+                          <div style="margin-top:14px">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                              <span style="{{ m.dot }}"></span>
+                              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b73">Curator · {{ m.itemName }}</span>
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+                              <sc-for list="{{ m.options }}" as="o" hint-placeholder-count="3">
+                                <div style="{{ o.card }}">
+                                  <div style="height:96px;background:repeating-linear-gradient(135deg,#f4f4f5 0 6px,#ececee 6px 12px);display:grid;place-items:center">
+                                    <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#9a9aa2;letter-spacing:0.04em">{{ o.imgLabel }}</span>
+                                  </div>
+                                  <div style="padding:11px 12px 12px">
+                                    <div style="font-size:13px;font-weight:500;letter-spacing:-0.01em">{{ o.name }}</div>
+                                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3f3f47;margin-top:3px">{{ o.range }}</div>
+                                    <p style="margin:7px 0 10px;font-size:12px;color:#6b6b73;line-height:1.4;text-wrap:pretty">{{ o.why }}</p>
+                                    <button onClick="{{ o.pick }}" style="{{ o.btn }}">{{ o.btnLabel }}</button>
+                                  </div>
+                                </div>
+                              </sc-for>
+                            </div>
+                            <div style="display:flex;gap:8px;margin-top:10px">
+                              <button onClick="{{ m.followUp }}" style="padding:7px 11px;border:1px solid #e3e3e6;border-radius:999px;background:#fff;font-size:12px;color:#3f3f47" style-hover="background:#f7f7f8">Ask a follow-up</button>
+                              <button onClick="{{ m.decide }}" style="padding:7px 11px;border:1px solid #e3e3e6;border-radius:999px;background:#fff;font-size:12px;color:#3f3f47" style-hover="background:#f7f7f8">You decide</button>
+                            </div>
+                          </div>
+                        </sc-if>
+
+                        <sc-if value="{{ m.isLocked }}" hint-placeholder-val="{{ false }}">
+                          <div style="margin-top:12px;border:1px solid #e3e3e6;border-radius:8px;padding:12px 14px">
+                            <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b73;margin-bottom:9px">Locked items</div>
+                            <div style="display:flex;flex-direction:column;gap:7px">
+                              <sc-for list="{{ locked }}" as="l" hint-placeholder-count="2">
+                                <div style="display:flex;align-items:center;gap:9px">
+                                  <span style="{{ l.dot }}"></span>
+                                  <span style="font-size:13px">{{ l.name }}</span>
+                                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9a9aa2;margin-left:auto">{{ l.range }}</span>
+                                </div>
+                              </sc-for>
+                            </div>
+                          </div>
+                        </sc-if>
+
+                        <sc-if value="{{ m.isStart }}" hint-placeholder-val="{{ false }}">
+                          <button onClick="{{ startSearch }}" style="margin-top:12px;padding:9px 16px;border:none;border-radius:6px;background:#101012;color:#fff;font-size:12.5px;font-weight:500" style-hover="background:#2c2c31">Dispatch agents</button>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="flex:none;padding:12px 28px 22px;border-top:1px solid #f2f2f3;background:#fff">
+            <div style="max-width:720px;margin:0 auto;display:flex;align-items:flex-end;gap:10px;border:1px solid #e3e3e6;border-radius:12px;padding:8px 8px 8px 14px;background:#fff">
+              <input value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onDraftKey }}" placeholder="Give me a list, or tell me a goal — “build me a budget gaming PC under S$1,600”" aria-label="Message Happy" style="flex:1;min-width:0;border:none;outline:none;padding:8px 0;font-size:14px;background:none">
+              <button onClick="{{ send }}" aria-label="Send" style="width:32px;height:32px;flex:none;border:none;border-radius:8px;background:#101012;color:#fff;display:grid;place-items:center">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 13V3.5M8 3.5 4 7.5M8 3.5l4 4"></path></svg>
+              </button>
+            </div>
+            <div style="max-width:720px;margin:8px auto 0;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#b4b4ba">Mandate active · auto-approve under S$600/item · card issued per purchase</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isSearch }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:26px 30px 34px">
+            <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:22px">
+              <div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b73;white-space:nowrap">Multi-agent search</div>
+                <h2 style="margin:5px 0 0;font-size:20px;font-weight:600;letter-spacing:-0.02em">Budget gaming PC build</h2>
+              </div>
+              <div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b6b73">
+                <span>{{ searchCounts }}</span>
+                <span>t+{{ elapsed }}</span>
+                <span style="display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;background:#101012;animation:h-blink 1.1s ease-in-out infinite"></span>{{ runLabel }}</span>
+                <button onClick="{{ togglePlay }}" style="padding:5px 10px;border:1px solid #e3e3e6;border-radius:6px;background:#fff;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3f3f47">{{ playLabel }}</button>
+              </div>
+            </div>
+
+            <div style="border:1px solid #e3e3e6;border-radius:8px;padding:18px 20px 14px;margin-bottom:22px">
+              <div style="overflow-x:auto"><div style="position:relative;padding:0 0 6px;min-width:540px">
+                <div style="display:flex;justify-content:space-between;margin-bottom:14px">
+                  <sc-for list="{{ stops }}" as="s" hint-placeholder-count="5">
+                    <div style="{{ s.head }}">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em;text-transform:uppercase">{{ s.label }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="position:relative;height:1px;background:#e3e3e6;margin:0 0 4px">
+                  <sc-for list="{{ stops }}" as="s2" hint-placeholder-count="5">
+                    <span style="{{ s2.tick }}"></span>
+                  </sc-for>
+                </div>
+                <sc-for list="{{ tracks }}" as="tr" hint-placeholder-count="6">
+                  <div style="position:relative;height:20px">
+                    <span style="{{ tr.dot }}"></span>
+                    <span style="{{ tr.tag }}">{{ tr.short }}</span>
+                  </div>
+                </sc-for>
+              </div></div>
+              <div style="display:flex;flex-wrap:wrap;gap:14px 20px;padding-top:12px;border-top:1px solid #f2f2f3">
+                <sc-for list="{{ tracks }}" as="lg" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:7px">
+                    <span style="{{ lg.chip }}"></span>
+                    <span style="font-size:12px;color:#3f3f47">{{ lg.name }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9a9aa2">{{ lg.stageLabel }}</span>
+                    <sc-if value="{{ lg.back }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#6b6b73;border:1px solid #e3e3e6;border-radius:4px;padding:1px 5px;white-space:nowrap;flex:none">re-check ↩</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px">
+              <sc-for list="{{ agents }}" as="a" hint-placeholder-count="12">
+                <div style="{{ a.tile }}">
+                  <div style="position:relative;height:118px;overflow:hidden;background:#fbfbfc">
+                    <div style="display:flex;align-items:center;gap:6px;padding:5px 7px;border-bottom:1px solid #f0f0f1;background:#fff;position:relative;z-index:2">
+                      <span style="{{ a.chip }}"></span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#9a9aa2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.url }}</span>
+                    </div>
+                    <sc-if value="{{ a.isScroll }}" hint-placeholder-val="{{ true }}">
+                      <div style="{{ a.scroll }}">
+                        <sc-for list="{{ a.rows }}" as="r" hint-placeholder-count="16">
+                          <div style="{{ r.bar }}"></div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ a.isGrid }}" hint-placeholder-val="{{ false }}">
+                      <div style="padding:8px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+                        <sc-for list="{{ a.cells }}" as="c" hint-placeholder-count="9">
+                          <div style="{{ c.cell }}"></div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,0) 55%,rgba(255,255,255,.92) 100%)"></div>
+                  </div>
+                  <div style="padding:8px 9px 9px;border-top:1px solid #f0f0f1">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#101012">{{ a.id }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#b4b4ba;margin-left:auto">{{ a.stageLabel }}</span>
+                    </div>
+                    <div style="font-size:11.5px;color:#6b6b73;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.itemName }} · {{ a.action }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isShortlist }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:26px 30px 34px">
+            <div style="max-width:860px;margin:0 auto">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b73">Shortlist</div>
+              <h2 style="margin:5px 0 4px;font-size:20px;font-weight:600;letter-spacing:-0.02em">One pick per item, ready for checkout</h2>
+              <p style="margin:0 0 20px;color:#6b6b73;font-size:13.5px">Agents compared 214 listings across 9 sellers. Reject any pick to send its agents back out.</p>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                <sc-for list="{{ picks }}" as="p" hint-placeholder-count="6">
+                  <div style="display:flex;flex-wrap:wrap;gap:14px;padding:14px;border-bottom:1px solid #f2f2f3;align-items:center">
+                    <div style="width:74px;height:58px;flex:none;border-radius:4px;background:repeating-linear-gradient(135deg,#f4f4f5 0 6px,#ececee 6px 12px);display:grid;place-items:center">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;color:#9a9aa2">{{ p.imgLabel }}</span>
+                    </div>
+                    <div style="min-width:190px;flex:1 1 260px">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <span style="{{ p.dot }}"></span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#9a9aa2;text-transform:uppercase;letter-spacing:0.06em">{{ p.itemName }}</span>
+                      </div>
+                      <div style="font-size:14px;font-weight:500;letter-spacing:-0.01em;margin-top:3px">{{ p.title }}</div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b6b73;margin-top:2px">{{ p.seller }} · {{ p.rating }}</div>
+                      <p style="margin:5px 0 0;font-size:12.5px;color:#6b6b73;text-wrap:pretty">{{ p.why }}</p>
+                    </div>
+                    <div style="text-align:right;flex:none">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:14px">{{ p.price }}</div>
+                      <button onClick="{{ p.reject }}" style="margin-top:8px;padding:5px 10px;border:1px solid #e3e3e6;border-radius:6px;background:#fff;font-size:11.5px;color:#6b6b73" style-hover="border-color:#101012;color:#101012">{{ p.rejectLabel }}</button>
+                    </div>
+                  </div>
+                </sc-for>
+                <div style="display:flex;align-items:center;gap:16px;padding:16px;background:#fafafa">
+                  <div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#6b6b73;text-transform:uppercase;letter-spacing:0.06em">Total</div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:19px;margin-top:2px">{{ total }}</div>
+                  </div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9a9aa2;line-height:1.6">
+                    <div>cap S$2,500 / activity · under by {{ capLeft }}</div>
+                    <div>card: single-use XSGD virtual · expires 60 min</div>
+                  </div>
+                  <button onClick="{{ confirmPurchase }}" style="margin-left:auto;padding:11px 20px;border:none;border-radius:6px;background:#101012;color:#fff;font-size:13px;font-weight:500" style-hover="background:#2c2c31">Confirm &amp; purchase</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isExec }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:26px 30px 34px">
+            <div style="max-width:820px;margin:0 auto">
+              <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:20px">
+                <div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b73;white-space:nowrap">Purchase execution</div>
+                  <h2 style="margin:5px 0 0;font-size:20px;font-weight:600;letter-spacing:-0.02em">{{ execTitle }}</h2>
+                </div>
+                <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b6b73">{{ execMeta }}</div>
+              </div>
+
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden;margin-bottom:20px">
+                <sc-for list="{{ execRows }}" as="e" hint-placeholder-count="6">
+                  <div style="{{ e.row }}">
+                    <span style="{{ e.dot }}"></span>
+                    <div style="min-width:150px;flex:1 1 180px">
+                      <div style="font-size:13.5px;font-weight:500">{{ e.itemName }}</div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9a9aa2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.title }}</div>
+                    </div>
+                    <div style="flex:1 1 150px;min-width:120px;max-width:210px">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#3f3f47">{{ e.stepLabel }}</div>
+                      <div style="position:relative;height:2px;background:#ececee;margin-top:6px;overflow:hidden">
+                        <span style="{{ e.fill }}"></span>
+                      </div>
+                    </div>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;flex:none;min-width:74px;text-align:right">{{ e.price }}</span>
+                    <span style="{{ e.state }}">{{ e.stateLabel }}</span>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="border:1px solid #e3e3e6;border-radius:8px;background:#fbfbfc;padding:14px 16px">
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b73;margin-bottom:9px">Agent log</div>
+                <div style="display:flex;flex-direction:column;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+                  <sc-for list="{{ log }}" as="ln" hint-placeholder-count="4">
+                    <div style="display:flex;gap:10px;animation:h-in 200ms ease both">
+                      <span style="color:#b4b4ba;flex:none">{{ ln.ts }}</span>
+                      <span style="{{ ln.tag }}">{{ ln.short }}</span>
+                      <span style="color:#3f3f47">{{ ln.text }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:20px;border:1px solid #e3e3e6;border-radius:8px;padding:18px 20px;display:flex;align-items:center;gap:18px">
+                  <div>
+                    <div style="font-size:15px;font-weight:600;letter-spacing:-0.01em">All 6 items purchased</div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b6b73;margin-top:4px">{{ total }} charged · 6 single-use cards expired · activity moved to Completed</div>
+                  </div>
+                  <button onClick="{{ newActivity }}" style="margin-left:auto;padding:10px 16px;border:1px solid #d3d3d8;border-radius:6px;background:#fff;font-size:12.5px">Start another activity</button>
+                  <button onClick="{{ goWallet }}" style="padding:10px 16px;border:none;border-radius:6px;background:#101012;color:#fff;font-size:12.5px;font-weight:500">View in wallet</button>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isArchive }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:28px 30px 40px">
+            <div style="max-width:760px;margin:0 auto">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b73">{{ archive.state }} activity</div>
+              <h2 style="margin:5px 0 16px;font-size:20px;font-weight:600;letter-spacing:-0.02em">{{ archive.title }}</h2>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;padding:16px 18px;margin-bottom:20px">
+                <span style="display:flex;gap:2px;flex-wrap:wrap">
+                  <sc-for list="{{ archive.bar }}" as="ab" hint-placeholder-count="40">
+                    <span style="{{ ab.style }}"></span>
+                  </sc-for>
+                </span>
+                <div style="display:flex;align-items:baseline;gap:14px;margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:#9a9aa2">
+                  <span>{{ archive.barLabel }}</span>
+                  <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-size:12px;color:#101012">{{ archive.total }}</span>
+                </div>
+              </div>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                <sc-for list="{{ archive.lines }}" as="al" hint-placeholder-count="3">
+                  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid #f2f2f3">
+                    <div style="min-width:180px;flex:1 1 240px">
+                      <div style="font-size:13.5px;font-weight:500">{{ al.name }}</div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9a9aa2">{{ al.seller }}</div>
+                    </div>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;margin-left:auto">{{ al.price }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isWallet }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:28px 30px 40px">
+            <div style="max-width:900px;margin:0 auto">
+              <h2 style="margin:0 0 18px;font-size:20px;font-weight:600;letter-spacing:-0.02em">Wallet</h2>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:26px">
+                <div style="flex:1;min-width:280px;border:1px solid #e3e3e6;border-radius:8px;padding:18px 20px">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b73">XSGD balance</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:30px;letter-spacing:-0.02em;margin:8px 0 2px">{{ balance }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9a9aa2">≈ S${{ balance }} · 0x8f…c14b · Polygon</div>
+                  <div style="display:flex;gap:8px;margin-top:16px">
+                    <button onClick="{{ topUp }}" style="padding:9px 15px;border:none;border-radius:6px;background:#101012;color:#fff;font-size:12.5px;font-weight:500">Top up</button>
+                    <button onClick="{{ noop }}" style="padding:9px 15px;border:1px solid #d3d3d8;border-radius:6px;background:#fff;font-size:12.5px">Withdraw</button>
+                  </div>
+                  <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+                    <div style="margin-top:12px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3f3f47;border:1px solid #e3e3e6;border-radius:6px;padding:8px 10px;background:#fafafa">{{ toast }}</div>
+                  </sc-if>
+                </div>
+                <div style="flex:1;min-width:280px;border:1px solid #e3e3e6;border-radius:8px;padding:18px 20px">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b73;margin-bottom:12px">Disposable cards</div>
+                  <div style="display:flex;flex-direction:column;gap:9px">
+                    <sc-for list="{{ cards }}" as="c" hint-placeholder-count="4">
+                      <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">{{ c.pan }}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9a9aa2;margin-left:auto">{{ c.amount }}</span>
+                        <span style="{{ c.chip }}">{{ c.status }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b73;margin-bottom:10px">Transactions</div>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                <sc-for list="{{ txns }}" as="t" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid #f2f2f3">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9a9aa2;width:112px;flex:none">{{ t.ts }}</span>
+                    <span style="font-size:13px;flex:1;min-width:0">{{ t.label }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9a9aa2">{{ t.ref }}</span>
+                    <span style="{{ t.amtStyle }}">{{ t.amount }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isMandate }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:28px 30px 40px">
+            <div style="max-width:720px;margin:0 auto">
+              <h2 style="margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-0.02em">Mandate</h2>
+              <p style="margin:0 0 22px;color:#6b6b73;font-size:13.5px;text-wrap:pretty">What agents may spend without asking. Anything outside these rules pauses for your approval.</p>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:16px;padding:16px;border-bottom:1px solid #f2f2f3">
+                  <div style="flex:1">
+                    <div style="font-size:13.5px;font-weight:500">Auto-approve purchases</div>
+                    <div style="font-size:12.5px;color:#6b6b73">Agents check out without a final tap when every rule below passes.</div>
+                  </div>
+                  <button onClick="{{ toggleAuto }}" aria-label="Auto-approve" style="{{ autoTrack }}"><span style="{{ autoKnob }}"></span></button>
+                </div>
+                <div style="display:flex;align-items:center;gap:16px;padding:16px;border-bottom:1px solid #f2f2f3">
+                  <div style="flex:1">
+                    <div style="font-size:13.5px;font-weight:500">Per-item cap</div>
+                    <div style="font-size:12.5px;color:#6b6b73">Highest single line item an agent may buy.</div>
+                  </div>
+                  <input type="range" min="100" max="1500" step="50" value="{{ itemCap }}" onChange="{{ onItemCap }}" style="width:180px;accent-color:#101012">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;width:82px;text-align:right">S${{ itemCap }}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:16px;padding:16px;border-bottom:1px solid #f2f2f3">
+                  <div style="flex:1">
+                    <div style="font-size:13.5px;font-weight:500">Per-activity cap</div>
+                    <div style="font-size:12.5px;color:#6b6b73">Total across all items in one activity.</div>
+                  </div>
+                  <input type="range" min="500" max="6000" step="100" value="{{ actCap }}" onChange="{{ onActCap }}" style="width:180px;accent-color:#101012">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;width:82px;text-align:right">S${{ actCap }}</span>
+                </div>
+                <div style="padding:16px">
+                  <div style="font-size:13.5px;font-weight:500;margin-bottom:4px">Category rules</div>
+                  <div style="font-size:12.5px;color:#6b6b73;margin-bottom:12px">Optional. Tap to switch a category between allowed, ask first, and blocked.</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px">
+                    <sc-for list="{{ rules }}" as="r" hint-placeholder-count="5">
+                      <button onClick="{{ r.cycle }}" style="{{ r.chip }}">{{ r.name }} <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#6b6b73">{{ r.state }}</span></button>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:28px 30px 40px">
+            <div style="max-width:660px;margin:0 auto">
+              <h2 style="margin:0 0 20px;font-size:20px;font-weight:600;letter-spacing:-0.02em">Settings</h2>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                <sc-for list="{{ settings }}" as="s" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:16px;padding:15px 16px;border-bottom:1px solid #f2f2f3">
+                    <div style="flex:1">
+                      <div style="font-size:13.5px;font-weight:500">{{ s.name }}</div>
+                      <div style="font-size:12.5px;color:#6b6b73">{{ s.desc }}</div>
+                    </div>
+                    <sc-if value="{{ s.isToggle }}" hint-placeholder-val="{{ true }}">
+                      <button onClick="{{ s.toggle }}" style="{{ s.track }}"><span style="{{ s.knob }}"></span></button>
+                    </sc-if>
+                    <sc-if value="{{ s.isValue }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#3f3f47">{{ s.value }}</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isProfile }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:28px 30px 40px">
+            <div style="max-width:660px;margin:0 auto">
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px">
+                <span style="width:56px;height:56px;border-radius:50%;background:#101012;color:#fff;display:grid;place-items:center;font-size:18px;font-weight:600">TL</span>
+                <div>
+                  <div style="font-size:19px;font-weight:600;letter-spacing:-0.02em">Tricia Lim</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#6b6b73">tricia.lim@hey.sg · member since Mar 2026</div>
+                </div>
+              </div>
+              <div style="border:1px solid #e3e3e6;border-radius:8px;overflow:hidden">
+                <sc-for list="{{ profileRows }}" as="p" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:16px;padding:14px 16px;border-bottom:1px solid #f2f2f3">
+                    <span style="font-size:13px;color:#6b6b73;width:150px;flex:none">{{ p.k }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">{{ p.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <button onClick="{{ noop }}" style="margin-top:18px;padding:10px 16px;border:1px solid #d3d3d8;border-radius:6px;background:#fff;font-size:12.5px;color:#3f3f47" style-hover="border-color:#101012;color:#101012">Sign out</button>
+            </div>
+          </div>
+        </sc-if>
+      </section>
+
+      <sc-if value="{{ showFeed }}" hint-placeholder-val="{{ true }}">
+        <aside style="width:312px;flex:none;border-left:1px solid #ececee;display:flex;flex-direction:column;background:#fcfcfd">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 12px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b73">Activity</span>
+            <button onClick="{{ newActivity }}" title="New activity" style="border:1px solid #e3e3e6;background:#fff;border-radius:6px;width:24px;height:24px;color:#3f3f47;line-height:1" style-hover="border-color:#101012;color:#101012">+</button>
+          </div>
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:0 14px 18px;display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ activities }}" as="act" hint-placeholder-count="4">
+              <button onClick="{{ act.open }}" style="{{ act.card }}">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="{{ act.icon }}"></span>
+                  <span style="font-size:13px;font-weight:500;letter-spacing:-0.01em;text-align:left;flex:1;min-width:0">{{ act.title }}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:9px">
+                  <span style="{{ act.chip }}">{{ act.state }}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#b4b4ba;margin-left:auto">{{ act.ts }}</span>
+                </div>
+                <div style="margin-top:10px">
+                  <span style="display:flex;gap:1.5px;overflow:hidden">
+                    <sc-for list="{{ act.bar }}" as="cb" hint-placeholder-count="26">
+                      <span style="{{ cb.style }}"></span>
+                    </sc-for>
+                  </span>
+                  <span style="display:block;margin-top:5px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#9a9aa2">{{ act.barLabel }}</span>
+                </div>
+              </button>
+            </sc-for>
+          </div>
+        </aside>
+      </sc-if>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;autoPlay&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;tickMs&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1500,&quot;min&quot;:700,&quot;max&quot;:3500,&quot;step&quot;:100,&quot;unit&quot;:&quot;ms&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Demo&quot;}}">
+class Component extends DCLogic {
+  STAGES = ['Discovering', 'Analyzing', 'Gathering', 'Comparing', 'Selected'];
+
+  ITEMS = [
+    { id: 'gpu', name: 'Graphics card', short: 'GPU', spec: 'RTX 4060 class, 8GB', budget: 'S$430', color: 'oklch(0.55 0.15 258)', start: 0, path: [0, 1, 2, 0, 1, 2, 3, 4] },
+    { id: 'cpu', name: 'Processor', short: 'CPU', spec: 'Ryzen 5 / Core i5, 6 cores', budget: 'S$285', color: 'oklch(0.55 0.16 22)', start: 0, path: [0, 1, 2, 3, 3, 4] },
+    { id: 'mb', name: 'Motherboard', short: 'MB', spec: 'B650 mATX, DDR5', budget: 'S$205', color: 'oklch(0.55 0.11 196)', start: 1, path: [0, 0, 1, 2, 0, 1, 2, 3, 4] },
+    { id: 'ram', name: 'Memory', short: 'RAM', spec: '16GB DDR5-6000 kit', budget: 'S$120', color: 'oklch(0.53 0.14 148)', start: 0, path: [0, 1, 1, 2, 3, 4] },
+    { id: 'psu', name: 'Power supply', short: 'PSU', spec: '650W 80+ Gold', budget: 'S$135', color: 'oklch(0.60 0.14 72)', start: 2, path: [0, 1, 2, 2, 3, 4] },
+    { id: 'case', name: 'Case', short: 'CASE', spec: 'mATX airflow, mesh front', budget: 'S$110', color: 'oklch(0.52 0.17 318)', start: 1, path: [0, 1, 2, 0, 0, 1, 2, 3, 4] }
+  ];
+
+  PICKS = {
+    gpu: { title: 'ASUS Dual RTX 4060 OC 8GB', seller: 'Bizgram Asia', rating: '4.8 · 1,204 reviews', price: 'S$429.00', n: 429, why: 'Cheapest in-stock 4060 from a seller with a local RMA counter.' },
+    cpu: { title: 'AMD Ryzen 5 7600 (boxed)', seller: 'Dynacore Sim Lim Sq.', rating: '4.9 · 863 reviews', price: 'S$279.00', n: 279, why: 'Boxed cooler included, S$18 under the next listing.' },
+    mb: { title: 'MSI PRO B650M-A WiFi', seller: 'Bizgram Asia', rating: '4.7 · 512 reviews', price: 'S$199.00', n: 199, why: 'Only mATX B650 under S$210 with WiFi 6E and 4 DIMM slots.' },
+    ram: { title: 'Kingston Fury Beast 16GB DDR5-6000', seller: 'Shopee · TechDeals.SG', rating: '4.8 · 3,417 reviews', price: 'S$112.00', n: 112, why: 'EXPO profile matches the board QVL; 12-month local warranty.' },
+    psu: { title: 'Cooler Master MWE Gold 650 V2', seller: 'Lazada · CM Official', rating: '4.9 · 2,088 reviews', price: 'S$129.00', n: 129, why: 'Fully modular at the price of the semi-modular rivals.' },
+    case: { title: 'Lian Li Lancool 205M Mesh', seller: 'Bizgram Asia', rating: '4.6 · 741 reviews', price: 'S$105.00', n: 105, why: 'Two 140mm intakes stock, clears the Dual 4060 by 40mm.' }
+  };
+
+  ALT = {
+    gpu: { title: 'Gigabyte RTX 4060 WINDFORCE OC', seller: 'Lazada · Gigabyte Store', rating: '4.7 · 968 reviews', price: 'S$449.00', n: 449, why: 'Re-searched pick: quieter cooler, S$20 more.' },
+    cpu: { title: 'Intel Core i5-13400F', seller: 'Bizgram Asia', rating: '4.8 · 1,102 reviews', price: 'S$268.00', n: 268, why: 'Re-searched pick: cheaper, needs an aftermarket cooler.' }
+  };
+
+  CURATOR = {
+    gpu: [
+      { name: 'RTX 4060 8GB', range: 'S$399 – S$489', why: 'Best 1080p per dollar with DLSS 3 and low power draw.', img: 'gpu · 4060' },
+      { name: 'RX 7600 8GB', range: 'S$359 – S$429', why: 'Cheaper raster, weaker ray tracing and upscaling.', img: 'gpu · 7600' },
+      { name: 'Arc B580 12GB', range: 'S$379 – S$419', why: 'More VRAM, driver maturity still uneven on older titles.', img: 'gpu · b580' }
+    ],
+    case: [
+      { name: 'mATX mesh airflow', range: 'S$95 – S$135', why: 'Coolest option; front mesh trades some fan noise damping.', img: 'case · mesh' },
+      { name: 'mATX tempered glass', range: 'S$105 – S$159', why: 'Looks better on a desk, runs 3–5°C warmer.', img: 'case · glass' },
+      { name: 'Compact ITX-style', range: 'S$139 – S$189', why: 'Small footprint, tight GPU clearance for a 2-slot card.', img: 'case · sff' }
+    ]
+  };
+
+  state = {
+    screen: 'purchase', stage: 'idle', sidebarOpen: true, draft: '', msgs: [],
+    editing: false, newItem: '', removed: {}, curatorIdx: 0, chosen: {},
+    tick: 0, playing: true, log: [], execStep: 0, rejected: {},
+    balance: 4820.5, toast: '', autoApprove: true, itemCap: 600, actCap: 2500,
+    ruleState: { Electronics: 'allowed', Groceries: 'allowed', Apparel: 'ask first', Travel: 'ask first', Collectibles: 'blocked' },
+    settingsState: { notify: true, digest: false, twofa: true, sandbox: false },
+    activityLive: false, activityDone: false, focused: null, actStage: 'wishlist', actMsgs: []
+  };
+
+  ARCHIVE = {
+    pantry: { title: 'Restock pantry — 12 items', ts: '12 Aug 2026 · 09:22', total: 'S$186.40', state: 'completed', frac: 1, lines: [['Jasmine rice 5kg', 'FairPrice Online', 'S$14.90'], ['Kikkoman soy sauce 1L', 'Redmart', 'S$9.20'], ['Milo refill 1.8kg', 'FairPrice Online', 'S$21.50'], ['Olive oil 750ml', 'Redmart', 'S$18.80'], ['+ 8 more items', 'mixed sellers', 'S$122.00']] },
+    desk: { title: 'Standing desk under S$700', ts: '09 Aug 2026 · 17:48', total: 'S$649.00', state: 'completed', frac: 1, lines: [['Ergotune Sit-Stand Pro 140cm', 'Ergotune SG', 'S$649.00']] },
+    gift: { title: 'Birthday gift for Mei', ts: '04 Aug 2026 · 11:02', total: 'S$0.00', state: 'cancelled', frac: 0.45, lines: [['Cancelled at shortlist — nothing under cap', 'no seller', 'S$0.00']] },
+    lens: { title: 'Monthly contact lenses', ts: '28 Jul 2026 · 20:15', total: 'S$96.00', state: 'completed', frac: 1, lines: [['Acuvue Oasys 6-pack ×2', 'Lazada · Acuvue Official', 'S$96.00']] }
+  };
+
+  componentWillUnmount() { this.clear(); }
+  clear() { clearInterval(this.t1); clearInterval(this.t2); clearTimeout(this.t3); }
+
+  items() { return this.ITEMS.filter(i => !this.state.removed[i.id]); }
+  tickMs() { return Number(this.props.tickMs ?? 1500); }
+  autoPlay() { return this.props.autoPlay !== false; }
+
+  say(msg) { this.setState(s => ({ msgs: s.msgs.concat([msg]) })); }
+
+  send = () => {
+    const text = (this.state.draft || '').trim() || 'build me a budget gaming PC under S$1,600';
+    this.setState({ draft: '', msgs: [{ isUser: true, text: text }, { isBot: true, isThinking: true, text: '', thinkingLabel: 'decomposing goal into a wishlist' }], stage: 'wishlist', activityLive: true });
+    clearTimeout(this.t3);
+    this.t3 = setTimeout(() => this.setState(s => ({
+      msgs: [s.msgs[0], { isBot: true, text: 'Six parts get you a solid 1080p build. Prices are current Singapore street prices, total lands near S$1,285 — inside your budget with room for a cooler if you want one.', isWishlist: true }]
+    })), 1100);
+  };
+
+  onDraft = (e) => this.setState({ draft: e.target.value });
+  onDraftKey = (e) => { if (e.key === 'Enter') this.send(); };
+  onNewItem = (e) => this.setState({ newItem: e.target.value });
+  onNewItemKey = (e) => { if (e.key === 'Enter') this.addItem(); };
+  addItem = () => this.setState({ newItem: '' });
+  toggleEditing = () => this.setState(s => ({ editing: !s.editing }));
+
+  approveWishlist = () => {
+    this.setState(s => ({ stage: 'curate', editing: false, curatorIdx: 0, msgs: s.msgs.concat([{ isUser: true, text: 'Looks right — go ahead.' }, this.curatorMsg('gpu')]) }));
+  };
+
+  curatorMsg(id) {
+    const it = this.ITEMS.find(i => i.id === id);
+    return { isBot: true, text: 'Two calls need you before agents go out. First, ' + it.name.toLowerCase() + ' — three shapes this could take:', isCurator: true, itemId: id, itemName: it.name };
+  }
+
+  pick(itemId, optName) {
+    this.setState(s => {
+      const chosen = Object.assign({}, s.chosen); chosen[itemId] = optName;
+      const msgs = s.msgs.concat([{ isUser: true, text: optName }]);
+      if (itemId === 'gpu') {
+        msgs.push({ isBot: true, text: 'Locked. Next, the case — this one changes thermals more than it looks:', isCurator: true, itemId: 'case', itemName: 'Case' });
+        return { chosen: chosen, msgs: msgs };
+      }
+      msgs.push({ isBot: true, text: 'That is everything ambiguous resolved. The other four are spec-bound, so agents can search them directly. Twelve agents, two per item, each working its own candidate listings.', isLocked: true, isStart: true });
+      return { chosen: chosen, msgs: msgs };
+    });
+  }
+
+  startSearch = () => {
+    this.clear();
+    this.setState({ stage: 'search', tick: 0, playing: this.autoPlay() });
+    if (this.autoPlay()) this.run();
+  };
+
+  run() {
+    clearInterval(this.t1);
+    this.t1 = setInterval(() => {
+      this.setState(s => {
+        const done = this.items().every(i => s.tick - i.start >= i.path.length - 1);
+        if (done) { clearInterval(this.t1); this.t3 = setTimeout(() => this.setState({ stage: 'shortlist' }), 1400); return { tick: s.tick }; }
+        return { tick: s.tick + 1 };
+      });
+    }, this.tickMs());
+  }
+
+  togglePlay = () => {
+    if (this.state.playing) { clearInterval(this.t1); this.setState({ playing: false }); }
+    else { this.setState({ playing: true }); this.run(); }
+  };
+
+  itemStage(i) {
+    const c = Math.max(0, Math.min(i.path.length - 1, this.state.tick - i.start));
+    const prev = c > 0 ? i.path[c - 1] : i.path[0];
+    const cur = i.path[c];
+    return { cur: cur, back: cur < prev, waiting: this.state.tick < i.start };
+  }
+
+  reject = (id) => this.setState(s => { const r = Object.assign({}, s.rejected); r[id] = true; return { rejected: r }; });
+
+  confirmPurchase = () => {
+    this.clear();
+    this.setState({ stage: 'exec', execStep: 0, log: [], activityDone: false, activityLive: true });
+    const items = this.items();
+    const steps = ['requesting single-use card', 'entering checkout', 'confirming order', 'order confirmed'];
+    this.t2 = setInterval(() => {
+      this.setState(s => {
+        const n = s.execStep;
+        const total = items.length * 4;
+        if (n >= total) {
+          clearInterval(this.t2);
+          const spent = items.reduce((a, i) => a + this.listing(i.id).n, 0);
+          return { activityDone: true, activityLive: false, balance: Math.round((s.balance - spent) * 100) / 100 };
+        }
+        const it = items[Math.floor(n / 4)];
+        const st = steps[n % 4];
+        const line = { ts: this.stamp(n), short: it.short, color: it.color, text: st === 'requesting single-use card' ? 'card 4319 ' + (4400 + n) + ' issued · limit ' + this.listing(it.id).price : st === 'entering checkout' ? this.listing(it.id).seller.toLowerCase().replace(/ /g, '-') + '/checkout · autofill ok' : st === 'confirming order' ? 'placing order ' + this.listing(it.id).price : 'order #SG' + (830142 + n * 7) + ' confirmed · card expired' };
+        return { execStep: n + 1, log: s.log.concat([line]) };
+      });
+    }, 620);
+  };
+
+  stamp(n) {
+    const base = 14 * 3600 + 32 * 60 + 8 + n * 3;
+    const h = Math.floor(base / 3600), m = Math.floor((base % 3600) / 60), sec = base % 60;
+    const p = (x) => String(x).padStart(2, '0');
+    return p(h) + ':' + p(m) + ':' + p(sec);
+  }
+
+  listing(id) { return this.state.rejected[id] && this.ALT[id] ? this.ALT[id] : this.PICKS[id]; }
+
+  newActivity = () => { this.clear(); this.setState({ screen: 'purchase', stage: 'idle', msgs: [], tick: 0, log: [], execStep: 0, rejected: {}, chosen: {}, activityLive: false, activityDone: false, focused: null, actMsgs: [] }); };
+  go = (screen) => () => this.setState({ screen: screen, toast: '' });
+
+  stash(s) { return { actStage: s.stage !== 'idle' ? s.stage : s.actStage, actMsgs: s.msgs.length ? s.msgs : s.actMsgs, stage: 'idle', msgs: [] }; }
+  back = () => this.setState(s => Object.assign({ screen: 'purchase', focused: null, toast: '' }, this.stash(s)));
+  openCurrent = () => this.setState(s => ({ screen: 'purchase', focused: 'current', stage: s.stage !== 'idle' ? s.stage : (s.actStage || 'wishlist'), msgs: s.msgs.length ? s.msgs : (s.actMsgs || []) }));
+  openArchive = (id) => () => this.setState(s => Object.assign({ screen: 'purchase', focused: id }, this.stash(s)));
+
+  chevs(frac, count, mode) {
+    const filled = Math.round(frac * count);
+    return Array.from({ length: count }, (_, i) => {
+      const hot = i < filled;
+      const t = count > 1 ? i / (count - 1) : 0;
+      return { style: {
+        width: 7, height: 12, flex: 'none', display: 'block',
+        clipPath: 'polygon(0 0, 52% 0, 100% 50%, 52% 100%, 0 100%)',
+        background: !hot ? '#e6e6e9' : mode === 'cancelled' ? '#c4c4ca' : 'oklch(0.70 0.175 ' + (88 - 62 * t).toFixed(1) + ')',
+        transition: 'background 420ms ease'
+      } };
+    });
+  }
+  goStage = (stage) => () => {
+    this.clear();
+    this.setState({ screen: 'purchase', stage: stage, activityLive: stage !== 'idle' });
+    if (stage === 'search') { this.setState({ tick: 0, playing: true }); this.run(); }
+    if (stage === 'exec') this.confirmPurchase();
+    if (stage === 'wishlist' || stage === 'curate') this.seed(stage);
+  };
+
+  seed(stage) {
+    const msgs = [{ isUser: true, text: 'build me a budget gaming PC under S$1,600' }, { isBot: true, text: 'Six parts get you a solid 1080p build. Prices are current Singapore street prices, total lands near S$1,285 — inside your budget with room for a cooler if you want one.', isWishlist: true }];
+    if (stage === 'curate') { msgs.push({ isUser: true, text: 'Looks right — go ahead.' }); msgs.push(this.curatorMsg('gpu')); }
+    this.setState({ msgs: msgs });
+  }
+
+  topUp = () => this.setState(s => ({ balance: Math.round((s.balance + 500) * 100) / 100, toast: '+500.00 XSGD received · tx 0x4c…9ae1 · 3 confirmations' }));
+  noop = () => {};
+  toggleSidebar = () => this.setState(s => ({ sidebarOpen: !s.sidebarOpen }));
+  toggleAuto = () => this.setState(s => ({ autoApprove: !s.autoApprove }));
+  onItemCap = (e) => this.setState({ itemCap: Number(e.target.value) });
+  onActCap = (e) => this.setState({ actCap: Number(e.target.value) });
+
+  money(n) { return 'S$' + n.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  renderVals() {
+    const s = this.state, items = this.items();
+    const on = s.screen === 'purchase';
+    const dot = (c, size) => ({ width: size || 8, height: size || 8, borderRadius: '50%', background: c, flex: 'none', display: 'inline-block' });
+    const navBtn = (active) => ({ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 9px', border: 'none', borderRadius: 6, background: active ? '#f0f0f1' : 'none', color: active ? '#101012' : '#6b6b73', fontSize: 13, fontWeight: active ? 500 : 400, textAlign: 'left' });
+
+    const arch = this.ARCHIVE[s.focused];
+    const effStage = s.stage !== 'idle' ? s.stage : s.actStage;
+    const flowIdx = { wishlist: 0, curate: 1, search: 2, shortlist: 3, exec: 4 };
+    const partial = () => {
+      if (effStage === 'search') { const m = Math.max.apply(null, this.ITEMS.map(i => Math.max(0, Math.min(i.path.length - 1, s.tick - i.start)) / (i.path.length - 1))); return m; }
+      if (effStage === 'exec') return s.activityDone ? 1 : Math.min(1, s.execStep / (items.length * 4));
+      return 0.5;
+    };
+    const flowFrac = s.activityDone ? 1 : (s.activityLive ? ((flowIdx[effStage] || 0) + partial()) / 5 : 0);
+
+    const barDefs = [['chat', 'idle'], ['list', 'wishlist'], ['search', 'search'], ['pick', 'shortlist'], ['buy', 'exec']];
+    const barFrac = s.stage === 'idle' ? 0 : (barDefs.findIndex(d => d[1] === s.stage) + (s.stage === 'search' || s.stage === 'exec' ? partial() : 1)) / 5;
+    const stageBar = barDefs.map(([name, st], gi) => {
+      const active = on && s.stage === st;
+      const local = Math.max(0, Math.min(1, barFrac * 5 - gi));
+      return {
+        name: name, chevs: this.chevs(local, 8),
+        go: () => { this.setState({ focused: 'current' }); this.goStage(st)(); },
+        btn: { display: 'flex', alignItems: 'center', gap: 9, padding: '4px 8px', border: '1px solid ' + (active ? '#d7d7db' : 'transparent'), borderRadius: 6, background: active ? '#fafafa' : 'none' },
+        label: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: active ? '#101012' : local >= 1 ? '#6b6b73' : '#b4b4ba' }
+      };
+    });
+
+    const wishlist = this.ITEMS.filter(i => !s.removed[i.id]).map(i => ({
+      name: i.name + ' — ' + i.spec.split(',')[0], spec: i.spec, budget: i.budget, dot: dot(i.color),
+      remove: () => this.setState(st => { const r = Object.assign({}, st.removed); r[i.id] = true; return { removed: r }; })
+    }));
+
+    const msgs = s.msgs.map((m) => {
+      if (!m.isCurator) return m;
+      const it = this.ITEMS.find(i => i.id === m.itemId);
+      const opts = this.CURATOR[m.itemId].map(o => {
+        const picked = s.chosen[m.itemId] === o.name;
+        return {
+          name: o.name, range: o.range, why: o.why, imgLabel: o.img,
+          card: { border: '1px solid ' + (picked ? '#101012' : '#e3e3e6'), borderRadius: 8, overflow: 'hidden', background: '#fff' },
+          btn: { width: '100%', padding: '7px 0', border: 'none', borderRadius: 6, background: picked ? '#101012' : '#f4f4f5', color: picked ? '#fff' : '#101012', fontSize: 12, fontWeight: 500 },
+          btnLabel: picked ? 'Locked' : 'Choose',
+          pick: () => this.pick(m.itemId, o.name)
+        };
+      });
+      return Object.assign({}, m, { options: opts, dot: dot(it.color), followUp: this.noop, decide: () => this.pick(m.itemId, this.CURATOR[m.itemId][0].name) });
+    });
+
+    const locked = Object.keys(s.chosen).map(k => {
+      const it = this.ITEMS.find(i => i.id === k);
+      const o = this.CURATOR[k].find(x => x.name === s.chosen[k]);
+      return { name: it.name + ' · ' + o.name, range: o.range, dot: dot(it.color) };
+    });
+
+    const pad = 10;
+    const stops = this.STAGES.map((label, i) => ({
+      label: label,
+      head: { width: '20%', textAlign: i === 0 ? 'left' : i === 4 ? 'right' : 'center', color: '#9a9aa2' },
+      tick: { position: 'absolute', top: -3, left: 'calc(' + (i / 4) * 100 + '% - ' + (i / 4) * 2 + 'px)', width: 1, height: 7, background: '#d3d3d8' }
+    }));
+
+    const tracks = this.ITEMS.map((i, idx) => {
+      const st = this.itemStage(i);
+      const pct = (st.cur / 4) * 100;
+      const move = st.back ? 'left 1450ms cubic-bezier(.7,-0.4,.3,1.4)' : 'left 850ms cubic-bezier(.22,.61,.36,1)';
+      return {
+        name: i.name, short: i.short, stageLabel: st.waiting ? 'queued' : this.STAGES[st.cur].toLowerCase(), back: st.back && !st.waiting,
+        chip: dot(i.color),
+        dot: {
+          position: 'absolute', top: 4, left: 'calc(' + pct + '% - ' + (pct / 100) * 11 + 'px)', width: 11, height: 11, borderRadius: '50%',
+          background: st.waiting ? '#fff' : i.color, border: st.waiting ? '1px dashed #c9c9cf' : '1px solid rgba(0,0,0,.08)',
+          transition: move + ', box-shadow 600ms ease',
+          boxShadow: st.back ? '0 0 0 5px color-mix(in oklab, ' + i.color + ' 22%, transparent)' : 'none', zIndex: 2
+        },
+        tag: {
+          position: 'absolute', top: 3, left: 'calc(' + pct + '% - ' + (pct / 100) * 11 + 'px)', transform: pct > 70 ? 'translateX(calc(-100% - 8px))' : 'translateX(16px)',
+          fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, letterSpacing: '0.04em', color: st.waiting ? '#c9c9cf' : i.color,
+          transition: move, whiteSpace: 'nowrap'
+        }
+      };
+    });
+
+    const hosts = { gpu: 'bizgram.com.sg/rtx-4060', cpu: 'dynacore.com.sg/ryzen-7600', mb: 'sim-lim.sg/b650m', ram: 'shopee.sg/kingston-fury', psu: 'lazada.sg/mwe-650-v2', case: 'bizgram.com.sg/lancool-205m' };
+    const acts = { 0: 'crawling listing pages', 1: 'reading spec table', 2: 'pulling seller history', 3: 'diffing 6 candidates', 4: 'locked candidate' };
+    const agents = [];
+    this.ITEMS.forEach((i, idx) => {
+      const st = this.itemStage(i);
+      for (let k = 0; k < 2; k++) {
+        const stage = k === 0 ? st.cur : Math.max(0, st.cur - 1);
+        agents.push({
+          id: 'ag-' + (4100 + idx * 17 + k * 3).toString(16), itemName: i.name, stageLabel: st.waiting ? 'queued' : this.STAGES[stage].toLowerCase(),
+          action: st.waiting ? 'waiting for a slot' : acts[stage], url: hosts[i.id] + (k ? '?p=2' : ''),
+          chip: dot(i.color, 6),
+          tile: { border: '1.5px solid ' + i.color, borderRadius: 5, overflow: 'hidden', background: '#fff', opacity: st.waiting ? 0.45 : 1, transition: 'opacity 400ms ease' },
+          isScroll: (idx + k) % 3 !== 2, isGrid: (idx + k) % 3 === 2,
+          scroll: { animation: 'h-scroll ' + (7 + (idx % 3)) + 's linear infinite', padding: '7px 8px', display: 'flex', flexDirection: 'column', gap: 5 },
+          rows: Array.from({ length: 18 }, (_, r) => ({ bar: { height: r % 5 === 0 ? 7 : 4, width: (48 + ((r * 37) % 52)) + '%', borderRadius: 2, background: r % 5 === 0 ? '#dcdce0' : '#eeeef0', flex: 'none' } })),
+          cells: Array.from({ length: 9 }, (_, c) => ({ cell: { height: 26, borderRadius: 3, background: c % 4 === 0 ? '#e4e4e8' : '#f1f1f3', animation: 'h-shimmer ' + (2 + (c % 3) * 0.4) + 's ease-in-out infinite', animationDelay: (c * 0.12) + 's' } }))
+        });
+      }
+    });
+
+    const picks = items.map(i => {
+      const L = this.listing(i.id);
+      return { itemName: i.name, dot: dot(i.color), title: L.title, seller: L.seller, rating: L.rating, why: L.why, price: L.price, imgLabel: i.short.toLowerCase(), rejectLabel: s.rejected[i.id] ? 're-searched' : 'Reject & re-search', reject: () => this.reject(i.id) };
+    });
+    const totalN = items.reduce((a, i) => a + this.listing(i.id).n, 0);
+
+    const stepNames = ['requesting card', 'entering checkout', 'confirming order', 'order confirmed'];
+    const execRows = items.map((i, idx) => {
+      const L = this.listing(i.id);
+      const rel = s.execStep - idx * 4;
+      const active = rel > 0 && rel < 4;
+      const done = rel >= 4;
+      const sIdx = Math.max(0, Math.min(3, rel - 1));
+      return {
+        itemName: i.name, title: L.title, price: L.price,
+        row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14, padding: '13px 16px', borderBottom: '1px solid #f2f2f3', background: active ? '#fbfbfc' : '#fff', transition: 'background 300ms ease' },
+        dot: Object.assign(dot(i.color, 9), { opacity: rel > 0 ? 1 : 0.3 }),
+        stepLabel: done ? 'complete' : rel <= 0 ? 'queued' : stepNames[sIdx],
+        fill: { position: 'absolute', inset: '0 auto 0 0', width: (done ? 100 : rel <= 0 ? 0 : (rel / 4) * 100) + '%', background: i.color, transition: 'width 500ms cubic-bezier(.22,.61,.36,1)', display: 'block' },
+        state: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '3px 7px', borderRadius: 4, flex: 'none', border: '1px solid ' + (done ? '#101012' : '#e3e3e6'), background: done ? '#101012' : '#fff', color: done ? '#fff' : '#9a9aa2' },
+        stateLabel: done ? 'purchased' : active ? 'live' : 'queued'
+      };
+    });
+
+    const log = s.log.slice(-14).map(l => ({ ts: l.ts, short: l.short, text: l.text, tag: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: l.color, width: 40, flex: 'none' } }));
+
+    const chip = (bg, fg, bd) => ({ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '3px 6px', borderRadius: 4, background: bg, color: fg, border: '1px solid ' + bd });
+    const liveState = effStage === 'search' ? 'searching' : effStage === 'shortlist' ? 'awaiting you' : effStage === 'exec' ? 'purchasing' : 'drafting';
+    const current = [];
+    if (s.activityLive || s.activityDone) current.push({
+      title: 'Budget gaming PC build', state: s.activityDone ? 'completed' : liveState, ts: s.activityDone ? '14:41' : 'now', live: !s.activityDone,
+      open: this.openCurrent,
+      icon: Object.assign(dot(s.activityDone ? '#101012' : '#3f3f47', 7), s.activityDone ? {} : { animation: 'h-blink 1.2s ease-in-out infinite' }),
+      card: { display: 'block', width: '100%', textAlign: 'left', border: '1px solid ' + (on ? '#101012' : '#e3e3e6'), borderRadius: 8, background: '#fff', padding: '12px 13px' },
+      chip: s.activityDone ? chip('#101012', '#fff', '#101012') : chip('#fff', '#3f3f47', '#d3d3d8'),
+      bar: this.chevs(flowFrac, 26), barLabel: s.activityDone ? 'complete' : (this.STAGES && effStage === 'search' ? 'searching…' : effStage === 'exec' ? 'purchasing…' : effStage === 'shortlist' ? 'awaiting you…' : 'drafting…')
+    });
+    const past = [
+      { id: 'pantry', title: 'Restock pantry — 12 items', state: 'completed', ts: 'Aug 12', frac: 1 },
+      { id: 'desk', title: 'Standing desk under S$700', state: 'completed', ts: 'Aug 09', frac: 1 },
+      { id: 'gift', title: 'Birthday gift for Mei', state: 'cancelled', ts: 'Aug 04', frac: 0.45 },
+      { id: 'lens', title: 'Monthly contact lenses', state: 'completed', ts: 'Jul 28', frac: 1 }
+    ].map(a => Object.assign({}, a, {
+      open: this.openArchive(a.id),
+      icon: dot(a.state === 'cancelled' ? '#c9c9cf' : '#101012', 7),
+      card: { display: 'block', width: '100%', textAlign: 'left', border: '1px solid #e3e3e6', borderRadius: 8, background: '#fff', padding: '12px 13px' },
+      chip: chip('#fafafa', a.state === 'cancelled' ? '#9a9aa2' : '#3f3f47', '#e3e3e6'),
+      bar: this.chevs(a.frac, 26, a.state === 'cancelled' ? 'cancelled' : null),
+      barLabel: a.state === 'cancelled' ? 'stopped at shortlist' : 'complete'
+    }));
+
+    const cards = [
+      { pan: '4319 •••• 4402', amount: 'S$429.00', status: 'used' },
+      { pan: '4319 •••• 4398', amount: 'S$279.00', status: 'used' },
+      { pan: '4319 •••• 4386', amount: 'S$120.00', status: 'expired' },
+      { pan: '4319 •••• 4371', amount: 'S$689.00', status: 'issued' },
+      { pan: '4319 •••• 4355', amount: 'S$42.60', status: 'viewed' }
+    ].map(c => ({ pan: c.pan, amount: c.amount, status: c.status, chip: chip(c.status === 'used' ? '#101012' : '#fff', c.status === 'used' ? '#fff' : '#3f3f47', c.status === 'expired' ? '#ececee' : '#d3d3d8') }));
+
+    const txns = [
+      { ts: '15 Aug · 14:33', label: 'Card authorisation · Bizgram Asia', ref: 'auth 4402', amount: '−S$429.00', neg: true },
+      { ts: '15 Aug · 14:10', label: 'Top-up from DBS ••4471', ref: '0x4c…9ae1', amount: '+S$500.00', neg: false },
+      { ts: '12 Aug · 09:22', label: 'Pantry restock · 12 items', ref: 'act 0f31', amount: '−S$186.40', neg: true },
+      { ts: '09 Aug · 17:48', label: 'Standing desk · Ergotune', ref: 'auth 4310', amount: '−S$649.00', neg: true },
+      { ts: '04 Aug · 11:02', label: 'Refund · cancelled activity', ref: 'act 0e88', amount: '+S$78.00', neg: false },
+      { ts: '28 Jul · 20:15', label: 'Contact lenses · Lazada', ref: 'auth 4288', amount: '−S$96.00', neg: true }
+    ].map(t => Object.assign({}, t, { amtStyle: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12.5, width: 96, textAlign: 'right', flex: 'none', color: t.neg ? '#101012' : '#3f3f47' } }));
+
+    const track = (v) => ({ width: 38, height: 22, flex: 'none', borderRadius: 999, border: '1px solid ' + (v ? '#101012' : '#d3d3d8'), background: v ? '#101012' : '#fff', padding: 2, display: 'flex', justifyContent: v ? 'flex-end' : 'flex-start', transition: 'background 180ms ease, border-color 180ms ease' });
+    const knob = (v) => ({ width: 16, height: 16, borderRadius: '50%', background: v ? '#fff' : '#c9c9cf', display: 'block', transition: 'background 180ms ease' });
+
+    const setDefs = [
+      { k: 'notify', name: 'Push notifications', desc: 'Alert me when an agent pauses for approval.' },
+      { k: 'sandbox', name: 'Sandbox mode', desc: 'Run agents end-to-end without issuing real cards.' }
+    ];
+    const settings = setDefs.map(d => ({ name: d.name, desc: d.desc, isToggle: true, isValue: false, value: '', track: track(s.settingsState[d.k]), knob: knob(s.settingsState[d.k]), toggle: () => this.setState(st => { const v = Object.assign({}, st.settingsState); v[d.k] = !v[d.k]; return { settingsState: v }; }) }))
+      .concat([{ name: 'Region & currency', desc: 'Used for listings, taxes and shipping estimates.', isToggle: false, isValue: true, value: 'Singapore · SGD', track: {}, knob: {}, toggle: this.noop },
+      { name: 'Data retention', desc: 'How long agent transcripts and screenshots are kept.', isToggle: false, isValue: true, value: '90 days', track: {}, knob: {}, toggle: this.noop }]);
+
+    const cycle = ['allowed', 'ask first', 'blocked'];
+    const rules = Object.keys(s.ruleState).map(name => {
+      const st = s.ruleState[name];
+      return {
+        name: name, state: st,
+        chip: { display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 999, fontSize: 12.5, background: st === 'blocked' ? '#f4f4f5' : '#fff', border: '1px solid ' + (st === 'allowed' ? '#101012' : '#e3e3e6'), color: st === 'blocked' ? '#9a9aa2' : '#101012' },
+        cycle: () => this.setState(prev => { const v = Object.assign({}, prev.ruleState); v[name] = cycle[(cycle.indexOf(v[name]) + 1) % 3]; return { ruleState: v }; })
+      };
+    });
+
+    const headers = { idle: 'New activity', wishlist: 'Budget gaming PC build', curate: 'Budget gaming PC build', search: 'Budget gaming PC build', shortlist: 'Budget gaming PC build', exec: 'Budget gaming PC build' };
+    const metas = { idle: 'draft', wishlist: 'step 1 of 5 · wishlist', curate: 'step 2 of 5 · clarification', search: 'step 3 of 5 · search', shortlist: 'step 4 of 5 · confirmation', exec: 'step 5 of 5 · execution' };
+    const screenTitle = { wallet: 'Wallet', mandate: 'Mandate', settings: 'Settings', profile: 'Profile' };
+
+    return {
+      sidebarOpen: s.sidebarOpen,
+      sidebarStyle: { width: s.sidebarOpen ? 216 : 60, flex: 'none', borderRight: '1px solid #ececee', display: 'flex', flexDirection: 'column', background: '#fcfcfd', transition: 'width 200ms cubic-bezier(.22,.61,.36,1)', overflow: 'hidden' },
+      navPurchase: navBtn(on), navWallet: navBtn(s.screen === 'wallet'), navMandate: navBtn(s.screen === 'mandate'), navSettings: navBtn(s.screen === 'settings'),
+      toggleSidebar: this.toggleSidebar,
+      goPurchase: this.back, goWallet: this.go('wallet'), goMandate: this.go('mandate'), goSettings: this.go('settings'), goProfile: this.go('profile'),
+      headerTitle: arch && on ? arch.title : on ? headers[s.stage] : screenTitle[s.screen], headerMeta: arch && on ? arch.ts : on ? metas[s.stage] : '',
+      stageBar: stageBar, showStageBar: on && !arch, back: this.back, showBack: !!s.focused && on,
+      isArchive: on && !!arch,
+      archive: arch ? { title: arch.title, ts: arch.ts, total: arch.total, state: arch.state, bar: this.chevs(arch.frac, 40, arch.state === 'cancelled' ? 'cancelled' : null), barLabel: arch.state === 'cancelled' ? 'cancelled at shortlist' : 'all items purchased', lines: arch.lines.map(l => ({ name: l[0], seller: l[1], price: l[2] })) } : { lines: [], bar: [] },
+      isChat: on && !arch && (s.stage === 'idle' || s.stage === 'wishlist' || s.stage === 'curate'),
+      isSearch: on && !arch && s.stage === 'search', isShortlist: on && !arch && s.stage === 'shortlist', isExec: on && !arch && s.stage === 'exec',
+      isWallet: s.screen === 'wallet', isMandate: s.screen === 'mandate', isSettings: s.screen === 'settings', isProfile: s.screen === 'profile',
+      showFeed: on && !s.focused, isEmpty: s.msgs.length === 0,
+      prompts: [
+        { text: 'build me a budget gaming PC under S$1,600', use: () => this.setState({ draft: 'build me a budget gaming PC under S$1,600' }) },
+        { text: 'restock my pantry, same brands as last month', use: () => this.setState({ draft: 'restock my pantry, same brands as last month' }) },
+        { text: 'here is a list of 8 things for a new apartment', use: () => this.setState({ draft: 'here is a list of 8 things for a new apartment' }) }
+      ],
+      draft: s.draft, onDraft: this.onDraft, onDraftKey: this.onDraftKey, send: this.send,
+      msgs: msgs, wishlist: wishlist, wishlistBudget: 'est. S$1,285 · cap S$' + s.actCap, editing: s.editing, editLabel: s.editing ? 'Done editing' : 'Edit list',
+      newItem: s.newItem, onNewItem: this.onNewItem, onNewItemKey: this.onNewItemKey, addItem: this.addItem, toggleEditing: this.toggleEditing, approveWishlist: this.approveWishlist,
+      locked: locked, startSearch: this.startSearch,
+      stops: stops, tracks: tracks, agents: agents,
+      searchCounts: items.length + ' items · ' + items.length * 2 + ' agents', elapsed: Math.round(s.tick * (this.tickMs() / 1000)) + 's',
+      runLabel: s.playing ? 'live' : 'paused', playLabel: s.playing ? 'pause' : 'resume', togglePlay: this.togglePlay,
+      picks: picks, total: this.money(totalN), capLeft: this.money(Math.max(0, s.actCap - totalN)), confirmPurchase: this.confirmPurchase,
+      execRows: execRows, log: log, isDone: s.activityDone,
+      execTitle: s.activityDone ? 'All orders placed' : 'Buying 6 items, one card each',
+      execMeta: s.activityDone ? 'completed 14:41 · ' + this.money(totalN) : 'sequential · single-use card per order',
+      newActivity: this.newActivity,
+      activities: current.concat(past),
+      balance: this.money(s.balance).replace('S$', ''), cards: cards, txns: txns, topUp: this.topUp, toast: s.toast, noop: this.noop,
+      autoTrack: track(s.autoApprove), autoKnob: knob(s.autoApprove), toggleAuto: this.toggleAuto,
+      itemCap: s.itemCap, actCap: s.actCap, onItemCap: this.onItemCap, onActCap: this.onActCap, rules: rules, settings: settings,
+      profileRows: [
+        { k: 'Name', v: 'Tricia Lim' }, { k: 'Email', v: 'tricia.lim@hey.sg' },
+        { k: 'Linked wallet', v: '0x8f41c2ba9d7e5f30a6b1d4c9e2f7a8b0c14b' },
+        { k: 'Wallet network', v: 'Polygon · XSGD' }, { k: 'Passkey', v: 'MacBook Pro · added 12 Jun 2026' },
+        { k: 'Agent identity', v: 'happy-agent/1.4 (tricia-lim)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

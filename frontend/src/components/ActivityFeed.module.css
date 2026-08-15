@@ -1,0 +1,142 @@
+.feed {
+  width: 312px;
+  flex: none;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-sunken);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+}
+
+.new {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--r-control);
+  width: 24px;
+  height: 24px;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.new:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  padding: 12px 13px;
+}
+
+.current {
+  border-color: var(--text-primary);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+  background: var(--text-primary);
+}
+
+.live {
+  background: var(--text-secondary);
+  animation: h-blink 1.2s ease-in-out infinite;
+}
+
+.cancelled {
+  background: #c9c9cf;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border-radius: var(--r-chip);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+}
+
+.chipDone {
+  background: var(--text-primary);
+  color: var(--surface);
+  border-color: var(--text-primary);
+}
+
+.chipArchived {
+  background: var(--surface-muted);
+  border-color: var(--border);
+}
+
+.chipCancelled {
+  color: var(--text-quaternary);
+}
+
+.ts {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-disabled);
+  margin-left: auto;
+}
+
+.progress {
+  margin-top: 10px;
+}
+
+.barLabel {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-quaternary);
+}

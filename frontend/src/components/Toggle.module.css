@@ -1,0 +1,33 @@
+.track {
+  width: 38px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  padding: 2px;
+  display: flex;
+  justify-content: flex-start;
+  transition:
+    background var(--t-toggle),
+    border-color var(--t-toggle);
+}
+
+.on {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+  justify-content: flex-end;
+}
+
+.knob {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #c9c9cf;
+  display: block;
+  transition: background var(--t-toggle);
+}
+
+.on .knob {
+  background: var(--surface);
+}

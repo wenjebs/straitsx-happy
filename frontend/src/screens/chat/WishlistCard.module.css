@@ -1,0 +1,125 @@
+.card {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-muted);
+}
+
+.headTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.budget {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+
+.rowBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.name {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.spec {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+.amount {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.remove {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--r-tile);
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  flex: none;
+}
+
+.remove:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+}
+
+.addInput {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  font-size: 12.5px;
+}
+
+.secondary {
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  flex: none;
+}
+
+.primary {
+  margin-left: auto;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--r-control);
+  background: var(--text-primary);
+  color: var(--surface);
+  font-size: 12.5px;
+  font-weight: 500;
+  flex: none;
+}
+
+.primary:hover {
+  background: var(--hover-primary);
+}

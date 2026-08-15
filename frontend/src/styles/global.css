@@ -1,0 +1,141 @@
+@import "./tokens.css";
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: #5b5b64;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font: inherit;
+}
+
+::placeholder {
+  color: var(--text-quaternary);
+}
+
+/* Never removed — focus is part of the spec. */
+:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+/* Mono is a semantic rule, not decoration: machine-produced values are mono. */
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Uppercase eyebrow, used above every screen title and panel heading. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.screen-title {
+  margin: 5px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Every screen scrolls inside the fixed shell rather than the page. */
+.screen {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@keyframes h-scroll {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes h-shimmer {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes h-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes h-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes h-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+/*
+ * Accessibility is part of the spec: with motion off the flow must stay fully
+ * legible, which means every animated state also reads as a static state.
+ */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    /* biome-ignore-start lint/complexity/noImportantStyles: must beat the inline
+       per-item transitions the search screen sets, or motion stays on */
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: see above */
+  }
+}
