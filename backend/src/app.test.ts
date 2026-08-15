@@ -4,7 +4,11 @@ import type { Config } from "./config.js";
 import { EventHub } from "./events.js";
 import type { AgentProvider } from "./providers/agent.js";
 import type { CardProvider, IssueCardRequest, IssuedCard, TopUpResult } from "./providers/card.js";
-import type { PurchaseAgentProvider, PurchaseAgentRequest } from "./providers/purchaseAgent.js";
+import type {
+  PurchaseAgentCancelRequest,
+  PurchaseAgentProvider,
+  PurchaseAgentRequest,
+} from "./providers/purchaseAgent.js";
 import { MemoryRepository } from "./repositories/memory.js";
 import { ActivityService } from "./services/activities.js";
 import { PurchaseService } from "./services/purchases.js";
@@ -61,6 +65,7 @@ class RecordingCards implements CardProvider {
 class RecordingPurchaseAgents implements PurchaseAgentProvider {
   readonly mode = "remote" as const;
   async startPurchase(_request: PurchaseAgentRequest): Promise<void> {}
+  async cancelPurchase(_request: PurchaseAgentCancelRequest): Promise<void> {}
 }
 
 function harness() {
@@ -114,6 +119,27 @@ describe("Happy backend contract", () => {
       status: string;
     }[];
     expect(liveActivities.filter((activity) => activity.status === "live")).toHaveLength(2);
+
+    const cancelledResponse = await app.request(`/v1/activities/${second.id}/cancel`, {
+      method: "POST",
+    });
+    expect(cancelledResponse.status).toBe(200);
+    const cancelled = (await cancelledResponse.json()) as { status: string };
+    expect(cancelled.status).toBe("cancelled");
+    const cancelledHistory = (await (
+      await app.request(`/v1/activities/${second.id}/checkpoints`)
+    ).json()) as { reason: string }[];
+    expect(cancelledHistory.at(-1)?.reason).toBe("activity.cancelled");
+
+    const lateCallback = await app.request(`/v1/integrations/agents/${second.id}/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer callback-secret",
+      },
+      body: JSON.stringify({ type: "run.failed", message: "late update" }),
+    });
+    expect(lateCallback.status).toBe(409);
 
     const unauthorized = await app.request(`/v1/integrations/agents/${created.id}/events`, {
       method: "POST",

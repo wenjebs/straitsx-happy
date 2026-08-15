@@ -120,7 +120,10 @@ Every activity endpoint returns this. Optional fields may be omitted.
       "options": [
         { "name": "RTX 4060 8GB", "range": "S$399 – S$489",
           "why": "Best 1080p per dollar with DLSS 3 and low power draw.",
-          "imgLabel": "gpu · 4060", "imageUrl": null }
+          "imgLabel": "gpu · 4060",
+          "imageUrl": "https://upload.wikimedia.org/example.jpg",
+          "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Example.jpg",
+          "imageAttribution": "Photographer · CC BY-SA 4.0 · Wikimedia Commons" }
       ] }
   ],
 
@@ -178,7 +181,8 @@ Every activity endpoint returns this. Optional fields may be omitted.
 | `execution[].action` | Optional current Closer status, shown above its livestream. |
 | `execution[].liveStreamUrl` | Optional embeddable Closer browser stream. It is rendered on the execution screen and must permit framing. |
 | `messages[].card` | Which in-chat card renders under the text. `thinking` \| `wishlist` \| `curator` \| `locked`. Omit for plain text. |
-| `imageUrl` | Optional on listings and curator options. When present the frontend renders it in place of the striped placeholder, same box size and radius. |
+| `imageUrl` | Optional on listings and curator options. When present the frontend renders the real image in place of the striped placeholder. Happy enriches missing curator images from Wikimedia Commons without blocking planning if the public service is unavailable. |
+| `imageSourceUrl`, `imageAttribution` | Optional on curator options. They make every enriched image traceable to its source and licence. |
 
 ---
 
@@ -204,6 +208,7 @@ All paths are relative to `VITE_API_BASE_URL`.
 | `POST` | `/v1/activities/:id/search/resume` | — | `Activity` |
 | `POST` | `/v1/activities/:id/shortlist/:itemId/reject` | — | `Activity` |
 | `POST` | `/v1/activities/:id/purchase` | `{ "idempotencyKey": string }` | `Activity` |
+| `POST` | `/v1/activities/:id/cancel` | — | `Activity` |
 | `GET` | `/v1/activities/:id/events` | — | `text/event-stream` (§5) |
 
 `GET /v1/activities` drives the activity feed. Return every activity newest
@@ -237,8 +242,15 @@ renders the "Items ready for search" panel and the "Dispatch agents" button.
 That panel lists the complete wishlist: the selected option for clarified items,
 and the existing specification and budget for items that were already spec-bound.
 
-Archived activities (`status` `completed` or `cancelled`) need only
-`id`, `title`, `status`, `displayTs`, `totalMinor` and `archiveLines`.
+`POST .../cancel` is valid for every live stage. It marks the activity
+`cancelled`, stops provider work where the provider supports cancellation,
+invalidates unused purchase-card access, persists a final checkpoint, and causes
+all late agent callbacks to return `409`. Cancellation cannot reverse an order
+that a merchant already accepted, so the frontend warns the user during `exec`.
+
+Archived activities (`status` `completed` or `cancelled`) retain their full
+activity document. The summary uses `archiveLines`; the history view reads the
+immutable full documents from `/checkpoints` to reconstruct chat through buy.
 
 ### Wallet, mandate, settings, profile
 

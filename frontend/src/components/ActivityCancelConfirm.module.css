@@ -1,0 +1,80 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 16, 18, 0.28);
+  animation: h-in 160ms ease both;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 440px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.body {
+  margin: 8px 0 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+
+.warning {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e1b3b3;
+  border-radius: var(--r-control);
+  background: #fff8f8;
+  color: #7f3333;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.dismiss,
+.confirm {
+  padding: 9px 15px;
+  border-radius: var(--r-control);
+  font-size: 12.5px;
+}
+
+.dismiss {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.confirm {
+  margin-left: auto;
+  border: none;
+  background: #9a3434;
+  color: white;
+  font-weight: 500;
+}
+
+.confirm:hover {
+  background: #7f2929;
+}
+
+.dismiss:disabled,
+.confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

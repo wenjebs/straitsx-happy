@@ -5,11 +5,23 @@ interface HeaderProps {
   title: string;
   meta: string;
   showBack: boolean;
+  showCancel?: boolean;
+  cancelling?: boolean;
   onBack: () => void;
+  onCancel?: () => void;
   onProfile: () => void;
 }
 
-export function Header({ title, meta, showBack, onBack, onProfile }: HeaderProps) {
+export function Header({
+  title,
+  meta,
+  showBack,
+  showCancel = false,
+  cancelling = false,
+  onBack,
+  onCancel,
+  onProfile,
+}: HeaderProps) {
   return (
     <header className={styles.header}>
       {showBack && (
@@ -23,6 +35,16 @@ export function Header({ title, meta, showBack, onBack, onProfile }: HeaderProps
       </div>
       <div className={styles.meta}>{meta}</div>
       <div className={styles.right}>
+        {showCancel && onCancel && (
+          <button
+            type="button"
+            className={styles.cancelActivity}
+            onClick={onCancel}
+            disabled={cancelling}
+          >
+            {cancelling ? "Cancelling…" : "Cancel activity"}
+          </button>
+        )}
         <button
           type="button"
           className={styles.avatarButton}

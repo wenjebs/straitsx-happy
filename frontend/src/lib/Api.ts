@@ -55,6 +55,9 @@ export interface CuratorOption {
   why: string;
   imgLabel: string;
   imageUrl?: string;
+  /** Click-through to the original image and licence details. */
+  imageSourceUrl?: string;
+  imageAttribution?: string;
 }
 
 export interface Clarification {
@@ -171,6 +174,17 @@ export interface Activity {
   totalMinor: number;
   /** Archived activities only: the line items to show in the archive view. */
   archiveLines?: { name: string; seller: string; price: string }[];
+}
+
+export interface ActivityCheckpoint {
+  checkpointId: string;
+  activityId: string;
+  userId: string;
+  reason: string;
+  createdAt: string;
+  stage: ActivityStage;
+  status: ActivityStatus;
+  activity: Activity;
 }
 
 export interface Wallet {
@@ -307,6 +321,10 @@ export function getActivity(id: string): Promise<Activity> {
   return isLive() ? get(`/v1/activities/${id}`) : mockBackend.getActivity(id);
 }
 
+export function getActivityHistory(id: string): Promise<ActivityCheckpoint[]> {
+  return isLive() ? get(`/v1/activities/${id}/checkpoints`) : mockBackend.getActivityHistory(id);
+}
+
 /** Starts a new activity from a free-text goal. Returns it already in `wishlist`. */
 export function createActivity(goal: string): Promise<Activity> {
   return isLive() ? post("/v1/activities", { goal }) : mockBackend.createActivity(goal);
@@ -369,6 +387,11 @@ export function confirmPurchase(id: string, idempotencyKey: string): Promise<Act
   return isLive()
     ? post(`/v1/activities/${id}/purchase`, { idempotencyKey })
     : mockBackend.confirmPurchase(id);
+}
+
+/** Stops all future work for a live activity and rejects late agent callbacks. */
+export function cancelActivity(id: string): Promise<Activity> {
+  return isLive() ? post(`/v1/activities/${id}/cancel`) : mockBackend.cancelActivity(id);
 }
 
 // ---------------------------------------------------------------------------

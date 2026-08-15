@@ -5,10 +5,12 @@ import styles from "./ArchiveScreen.module.css";
 
 interface ArchiveScreenProps {
   activity: Activity;
+  historyLoading: boolean;
+  onViewHistory: () => void;
 }
 
 /** A focused past activity: summary bar over its line items. */
-export function ArchiveScreen({ activity }: ArchiveScreenProps) {
+export function ArchiveScreen({ activity, historyLoading, onViewHistory }: ArchiveScreenProps) {
   const cancelled = activity.status === "cancelled";
   const lines = activity.archiveLines ?? [];
 
@@ -27,7 +29,7 @@ export function ArchiveScreen({ activity }: ArchiveScreenProps) {
             {...(cancelled ? { mode: "cancelled" as const } : {})}
           />
           <div className={styles.summaryMeta}>
-            <span>{cancelled ? "cancelled at shortlist" : "all items purchased"}</span>
+            <span>{cancelled ? `cancelled during ${activity.stage}` : "all items purchased"}</span>
             <span className={styles.total}>{formatMinor(activity.totalMinor)}</span>
           </div>
         </div>
@@ -42,7 +44,19 @@ export function ArchiveScreen({ activity }: ArchiveScreenProps) {
               <span className={styles.price}>{line.price}</span>
             </div>
           ))}
+          {lines.length === 0 && (
+            <div className={styles.empty}>No completed purchases were recorded.</div>
+          )}
         </div>
+
+        <button
+          type="button"
+          className={styles.historyButton}
+          onClick={onViewHistory}
+          disabled={historyLoading}
+        >
+          {historyLoading ? "Loading history…" : "View activity history"}
+        </button>
       </div>
     </div>
   );

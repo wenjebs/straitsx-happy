@@ -19,6 +19,9 @@ export interface CuratorOption {
   why: string;
   imgLabel: string;
   imageUrl?: string | undefined;
+  /** Public source page for the option image and its licence details. */
+  imageSourceUrl?: string | undefined;
+  imageAttribution?: string | undefined;
 }
 
 export interface Clarification {
@@ -80,7 +83,7 @@ export interface PurchaseRun {
   activityId: string;
   userId: string;
   idempotencyKey: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "cancelled";
   itemIndex: number;
   candidateIndex: number;
   attemptIndex: number;

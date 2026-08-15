@@ -4,6 +4,7 @@ import { HttpError } from "../errors.js";
 export interface PlannerProvider {
   readonly mode: "local" | "remote" | "openai" | "disabled";
   startPlanning(activity: Activity): Promise<void>;
+  cancelPlanning?(activity: Activity): Promise<void>;
 }
 
 export interface ScoutProvider {
@@ -11,6 +12,7 @@ export interface ScoutProvider {
   dispatchSearch(activity: Activity): Promise<void>;
   setSearchPaused(activity: Activity, paused: boolean): Promise<void>;
   rejectListing(activity: Activity, itemId: string): Promise<void>;
+  cancelSearch?(activity: Activity): Promise<void>;
 }
 
 export interface AgentProvider extends PlannerProvider, ScoutProvider {
@@ -26,10 +28,12 @@ interface LocalAgentOptions {
 export class LocalAgentProvider implements AgentProvider {
   readonly mode = "local" as const;
   private readonly paused = new Set<string>();
+  private readonly cancelled = new Set<string>();
 
   constructor(private readonly options: LocalAgentOptions) {}
 
   async startPlanning(activity: Activity): Promise<void> {
+    this.cancelled.delete(activity.id);
     void this.after(700, activity.id, {
       type: "wishlist.ready",
       title: "Everyday desk essentials",
@@ -60,8 +64,18 @@ export class LocalAgentProvider implements AgentProvider {
     });
   }
 
+  async cancelPlanning(activity: Activity): Promise<void> {
+    this.cancelled.add(activity.id);
+  }
+
   async dispatchSearch(activity: Activity): Promise<void> {
+    this.cancelled.delete(activity.id);
     void this.runSearch(activity);
+  }
+
+  async cancelSearch(activity: Activity): Promise<void> {
+    this.cancelled.add(activity.id);
+    this.paused.delete(activity.id);
   }
 
   async setSearchPaused(activity: Activity, paused: boolean): Promise<void> {
@@ -85,6 +99,7 @@ export class LocalAgentProvider implements AgentProvider {
   private async runSearch(activity: Activity): Promise<void> {
     for (const item of activity.wishlist) {
       for (const slot of [0, 1] as const) {
+        if (this.cancelled.has(activity.id)) return;
         await this.post(activity.id, {
           type: "agent.update",
           agent: {
@@ -103,8 +118,10 @@ export class LocalAgentProvider implements AgentProvider {
 
     for (const stage of [1, 2, 3, 4] as const) {
       await this.waitIfPaused(activity.id);
+      if (this.cancelled.has(activity.id)) return;
       await delay(520);
       for (const item of activity.wishlist) {
+        if (this.cancelled.has(activity.id)) return;
         await this.post(activity.id, {
           type: "item.progress",
           progress: {
@@ -139,11 +156,13 @@ export class LocalAgentProvider implements AgentProvider {
       }
     }
     await delay(450);
+    if (this.cancelled.has(activity.id)) return;
     await this.post(activity.id, { type: "shortlist.ready", shortlist: localShortlist(activity) });
   }
 
   private async after(ms: number, activityId: string, body: unknown): Promise<void> {
     await delay(ms);
+    if (this.cancelled.has(activityId)) return;
     await this.post(activityId, body);
   }
 
@@ -228,6 +247,20 @@ export class RemoteAgentProvider implements AgentProvider {
     });
   }
 
+  async cancelPlanning(activity: Activity): Promise<void> {
+    await this.cancelRun(activity);
+  }
+
+  async cancelSearch(activity: Activity): Promise<void> {
+    await this.cancelRun(activity);
+  }
+
+  private async cancelRun(activity: Activity): Promise<void> {
+    await this.post(`/v1/runs/${encodeURIComponent(activity.id)}/cancel`, {
+      callback: this.callback(activity.id),
+    });
+  }
+
   private callback(activityId: string) {
     return {
       url: `${this.options.callbackBaseUrl.replace(/\/$/, "")}/v1/integrations/agents/${encodeURIComponent(activityId)}/events`,
@@ -268,6 +301,10 @@ export class DisabledAgentProvider implements AgentProvider {
   async startPlanning(): Promise<void> {
     this.unavailable();
   }
+
+  async cancelPlanning(): Promise<void> {}
+
+  async cancelSearch(): Promise<void> {}
 
   async dispatchSearch(): Promise<void> {
     this.unavailable();

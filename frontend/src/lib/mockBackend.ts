@@ -30,6 +30,7 @@ import {
 } from "../data/catalog";
 import type {
   Activity,
+  ActivityCheckpoint,
   ActivityEvent,
   AgentState,
   Clarification,
@@ -210,6 +211,38 @@ class MockBackend {
     const archived = archivedActivity(id as ArchiveId);
     if (!archived) throw new Error(`no such activity: ${id}`);
     return archived;
+  }
+
+  async getActivityHistory(id: string): Promise<ActivityCheckpoint[]> {
+    const activity = await this.getActivity(id);
+    return [
+      {
+        checkpointId: `mock-${id}`,
+        activityId: id,
+        userId: "mock-user",
+        reason: activity.status === "completed" ? "purchase.completed" : "activity.cancelled",
+        createdAt: activity.createdAt,
+        stage: activity.stage,
+        status: activity.status,
+        activity,
+      },
+    ];
+  }
+
+  async cancelActivity(_id: string): Promise<Activity> {
+    if (this.current?.status !== "live") throw new Error("no live activity");
+    this.clearTimers();
+    this.current.status = "cancelled";
+    this.current.searchPlaying = false;
+    this.current.completedAt = new Date().toISOString();
+    this.current.displayTs = "now";
+    this.current.messages.push({
+      id: nextId("msg"),
+      role: "assistant",
+      text: "This activity was cancelled. Happy will ignore any later agent updates.",
+    });
+    this.snapshot();
+    return this.clone(this.current);
   }
 
   async createActivity(goal: string): Promise<Activity> {

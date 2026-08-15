@@ -66,23 +66,33 @@ export interface OpenAIPlannerOptions {
 /** Happy-owned planner. OpenAI returns schema-constrained data; Happy assigns durable ids. */
 export class OpenAIPlannerProvider implements PlannerProvider {
   readonly mode = "openai" as const;
+  private readonly runs = new Map<string, AbortController>();
 
   constructor(private readonly options: OpenAIPlannerOptions) {}
 
   async startPlanning(activity: Activity): Promise<void> {
-    void this.plan(activity).catch(async (error) => {
-      try {
-        await this.postCallback(activity.id, {
-          type: "run.failed",
-          message: `Happy could not prepare the wishlist: ${asMessage(error)}`,
-        });
-      } catch (callbackError) {
-        console.error("OpenAI planner and failure callback both failed", callbackError);
-      }
-    });
+    const controller = new AbortController();
+    this.runs.set(activity.id, controller);
+    void this.plan(activity, controller.signal)
+      .catch(async (error) => {
+        if (controller.signal.aborted) return;
+        try {
+          await this.postCallback(activity.id, {
+            type: "run.failed",
+            message: `Happy could not prepare the wishlist: ${asMessage(error)}`,
+          });
+        } catch (callbackError) {
+          console.error("OpenAI planner and failure callback both failed", callbackError);
+        }
+      })
+      .finally(() => this.runs.delete(activity.id));
   }
 
-  private async plan(activity: Activity): Promise<void> {
+  async cancelPlanning(activity: Activity): Promise<void> {
+    this.runs.get(activity.id)?.abort();
+  }
+
+  private async plan(activity: Activity, signal: AbortSignal): Promise<void> {
     const goal =
       activity.messages.find((message) => message.role === "user")?.text ?? activity.title;
     const response = await (this.options.fetcher ?? fetch)(
@@ -114,7 +124,7 @@ export class OpenAIPlannerProvider implements PlannerProvider {
             },
           },
         }),
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
       },
     );
     if (!response.ok) {

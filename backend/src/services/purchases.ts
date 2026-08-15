@@ -102,6 +102,66 @@ export class PurchaseService {
     return activity;
   }
 
+  async cancel(activityId: string): Promise<Activity> {
+    const [activity, run] = await Promise.all([
+      this.getActivity(activityId),
+      this.repository.getPurchaseRun(activityId),
+    ]);
+    if (activity.status !== "live" || activity.stage !== "exec") {
+      throw new HttpError(409, "This activity has no live purchase to cancel.");
+    }
+
+    let agentWarning = "";
+    if (run?.status === "running") {
+      const attemptId = run.attemptId;
+      run.status = "cancelled";
+      run.updatedAt = new Date().toISOString();
+      await this.repository.putPurchaseRun(run);
+      await this.expireCurrentCard(run);
+      this.clearAttempt(run);
+      await this.repository.putPurchaseRun(run);
+      try {
+        await this.purchaseAgents.cancelPurchase({
+          activityId,
+          ...(attemptId ? { attemptId } : {}),
+          reason: "Cancelled by the user in Happy.",
+        });
+      } catch (error) {
+        agentWarning = ` · remote Closer did not acknowledge cancellation: ${asMessage(error)}`;
+      }
+    }
+
+    const purchasedIds = new Set(
+      activity.execution.filter((row) => row.state === "purchased").map((row) => row.itemId),
+    );
+    activity.archiveLines = activity.shortlist
+      .filter((pick) => purchasedIds.has(pick.itemId))
+      .map((pick) => ({
+        name: activity.wishlist.find((item) => item.id === pick.itemId)?.name ?? pick.itemId,
+        seller: pick.listing.seller,
+        price: pick.listing.price,
+      }));
+    activity.totalMinor = activity.shortlist
+      .filter((pick) => purchasedIds.has(pick.itemId))
+      .reduce((sum, pick) => sum + pick.listing.amountMinor, 0);
+    activity.status = "cancelled";
+    activity.searchPlaying = false;
+    activity.completedAt = displayTime();
+    activity.displayTs = activity.completedAt;
+    const line: LogLine = {
+      id: newId("log"),
+      ts: logTime(),
+      tag: "SYS",
+      hueIndex: 0,
+      text: `purchase cancelled by user · unused card access invalidated${agentWarning}`,
+    };
+    activity.log.push(line);
+    await this.repository.putActivity(activity, "purchase.cancelled");
+    this.events.emit(activity.id, { type: "log.line", line });
+    this.snapshot(activity);
+    return activity;
+  }
+
   async handleAgentEvent(activityId: string, event: PurchaseAgentCallback): Promise<Activity> {
     const [activity, run] = await Promise.all([
       this.getActivity(activityId),
@@ -109,7 +169,7 @@ export class PurchaseService {
     ]);
     if (!run) throw new HttpError(404, `Purchase run for ${activityId} was not found.`);
     if (run.processedEventIds.includes(event.eventId)) return activity;
-    if (run.status !== "running" || activity.stage !== "exec") {
+    if (run.status !== "running" || activity.status !== "live" || activity.stage !== "exec") {
       throw new HttpError(409, `Purchase run for ${activityId} is not running.`);
     }
     const pick = activity.shortlist[run.itemIndex];
@@ -171,7 +231,7 @@ export class PurchaseService {
       this.getActivity(activityId),
       this.repository.getPurchaseRun(activityId),
     ]);
-    if (run?.status !== "running" || activity.stage !== "exec") {
+    if (run?.status !== "running" || activity.status !== "live" || activity.stage !== "exec") {
       throw new HttpError(409, "This purchase attempt is not running.");
     }
     if (run.attemptId !== attemptId) {
@@ -247,7 +307,7 @@ export class PurchaseService {
       this.getActivity(activityId),
       this.repository.getPurchaseRun(activityId),
     ]);
-    if (run?.status !== "running" || run.attemptId) return;
+    if (run?.status !== "running" || activity.status !== "live" || run.attemptId) return;
     const [mandate, settings] = await Promise.all([
       this.repository.getMandate(activity.userId),
       this.repository.getSettings(activity.userId),
@@ -334,6 +394,13 @@ export class PurchaseService {
     orderId: string,
     message?: string,
   ): Promise<void> {
+    const [persistedActivity, persistedRun] = await Promise.all([
+      this.repository.getActivity(activity.id),
+      this.repository.getPurchaseRun(activity.id),
+    ]);
+    if (persistedActivity?.status !== "live" || persistedRun?.status !== "running") {
+      throw new HttpError(409, "This order confirmation arrived after cancellation.");
+    }
     const pick = activity.shortlist[run.itemIndex];
     if (!pick) throw new Error("Confirmed item is outside the shortlist.");
     const listing = [pick.listing, ...(pick.alternates ?? [])][run.candidateIndex];

@@ -1,4 +1,12 @@
-import type { Activity, ConnectionState, Mandate, Profile, Settings, Wallet } from "../lib/Api";
+import type {
+  Activity,
+  ActivityCheckpoint,
+  ConnectionState,
+  Mandate,
+  Profile,
+  Settings,
+  Wallet,
+} from "../lib/Api";
 
 export type Screen = "purchase" | "wallet" | "mandate" | "settings" | "profile";
 
@@ -21,6 +29,9 @@ export interface HappyState {
   /** Confirmation before discarding curator choices and returning to wishlist editing. */
   confirmingWishlistRevert: boolean;
   wishlistReverting: boolean;
+  /** Confirmation for stopping any live activity. */
+  confirmingActivityCancel: boolean;
+  activityCancelling: boolean;
   /** Guards the irreversible purchase call behind an explicit confirmation. */
   confirmingPurchase: boolean;
   /** Set while a spend call is in flight, so it cannot be submitted twice. */
@@ -34,6 +45,8 @@ export interface HappyState {
   /** The selected live activity. Other live activities continue in activities. */
   running: Activity | null;
   viewingArchive: Activity | null;
+  activityHistory: ActivityCheckpoint[] | null;
+  historyLoading: boolean;
   wallet: Wallet | null;
   mandate: Mandate | null;
   settings: Settings | null;

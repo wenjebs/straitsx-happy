@@ -52,6 +52,26 @@
   gap: 14px;
 }
 
+.cancelActivity {
+  border: 1px solid #d9a6a6;
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: #9a3434;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cancelActivity:hover {
+  border-color: #9a3434;
+  background: #fff7f7;
+}
+
+.cancelActivity:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .avatarButton {
   display: flex;
   align-items: center;

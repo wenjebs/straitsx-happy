@@ -43,6 +43,8 @@ const CuratorOption = z.object({
   why: z.string().max(1000),
   imgLabel: z.string().max(100),
   imageUrl: z.url().optional(),
+  imageSourceUrl: z.url().optional(),
+  imageAttribution: z.string().max(500).optional(),
 });
 
 const Clarification = z.object({

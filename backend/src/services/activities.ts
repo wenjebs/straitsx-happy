@@ -6,10 +6,11 @@ import type {
   Message,
   WishlistItem,
 } from "../domain.js";
-import { DEFAULT_USER_ID, formatMinor, newId } from "../domain.js";
+import { DEFAULT_USER_ID, displayTime, formatMinor, newId } from "../domain.js";
 import { HttpError } from "../errors.js";
 import type { EventHub } from "../events.js";
 import type { PlannerProvider, ScoutProvider } from "../providers/agent.js";
+import type { OptionImageResolver } from "../providers/wikimediaImages.js";
 import type { Repository } from "../repository.js";
 import type { AgentCallback } from "../schemas.js";
 
@@ -19,6 +20,7 @@ export class ActivityService {
     private readonly events: EventHub,
     private readonly planner: PlannerProvider,
     private readonly scouts: ScoutProvider,
+    private readonly resolveOptionImage?: OptionImageResolver,
   ) {}
 
   list(userId = DEFAULT_USER_ID): Promise<Activity[]> {
@@ -34,6 +36,39 @@ export class ActivityService {
   async history(id: string) {
     await this.get(id);
     return this.repository.listActivityCheckpoints(id);
+  }
+
+  async cancel(id: string): Promise<Activity> {
+    const activity = await this.get(id);
+    if (activity.status !== "live") {
+      throw new HttpError(409, `Activity ${id} is no longer live.`);
+    }
+    if (activity.stage === "exec") {
+      throw new HttpError(409, "Execution cancellation must be handled by the purchase service.");
+    }
+
+    let providerWarning = "";
+    try {
+      if (activity.stage === "wishlist") await this.planner.cancelPlanning?.(activity);
+      if (activity.stage === "search") await this.scouts.cancelSearch?.(activity);
+    } catch (error) {
+      providerWarning =
+        error instanceof Error
+          ? ` The remote agent did not acknowledge the stop request: ${error.message}`
+          : " The remote agent did not acknowledge the stop request.";
+    }
+
+    activity.status = "cancelled";
+    activity.searchPlaying = false;
+    activity.completedAt = displayTime();
+    activity.displayTs = activity.completedAt;
+    activity.messages.push({
+      id: newId("msg"),
+      role: "assistant",
+      text: `This activity was cancelled. Happy will reject any late agent updates.${providerWarning}`,
+    });
+    await this.saveSnapshot(activity, "activity.cancelled");
+    return activity;
   }
 
   async create(goal: string, userId = DEFAULT_USER_ID): Promise<Activity> {
@@ -257,11 +292,34 @@ export class ActivityService {
         activity.wishlist = event.wishlist.map((item, index) => ({ ...item, hueIndex: index % 6 }));
         activity.wishlistEstimate = event.wishlistEstimate;
         const clarificationItems = new Set<string>();
-        activity.clarifications = event.clarifications.filter((row) => {
+        const uniqueClarifications = event.clarifications.filter((row) => {
           if (clarificationItems.has(row.itemId)) return false;
           clarificationItems.add(row.itemId);
           return true;
         });
+        activity.clarifications = await Promise.all(
+          uniqueClarifications.map(async (clarification) => {
+            const item = event.wishlist.find((row) => row.id === clarification.itemId);
+            const options = await Promise.all(
+              clarification.options.map(async (option) => {
+                if (option.imageUrl || !this.resolveOptionImage) return option;
+                try {
+                  const image = await this.resolveOptionImage(
+                    `${item?.name ?? "product"} ${option.imgLabel || option.name}`,
+                  );
+                  return image ? { ...option, ...image } : option;
+                } catch {
+                  return option;
+                }
+              }),
+            );
+            return { ...clarification, options };
+          }),
+        );
+        const latest = await this.repository.getActivity(id);
+        if (latest?.status !== "live") {
+          throw new HttpError(409, `Activity ${id} was cancelled while images were loading.`);
+        }
         const userMessage = activity.messages.find((message) => message.role === "user");
         activity.messages = [
           ...(userMessage ? [userMessage] : []),

@@ -80,3 +80,30 @@
   font-size: 12px;
   margin-left: auto;
 }
+
+.empty {
+  padding: 18px 16px;
+  color: var(--text-quaternary);
+  font-size: 12px;
+}
+
+.historyButton {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.historyButton:hover {
+  background: var(--hover-surface);
+}
+
+.historyButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

@@ -127,6 +127,15 @@ export function createApp(deps: AppDependencies): Hono {
     return c.json(await deps.purchases.start(c.req.param("id"), body.idempotencyKey), 202);
   });
 
+  app.post("/v1/activities/:id/cancel", async (c) => {
+    const activity = await deps.activities.get(c.req.param("id"));
+    return c.json(
+      activity.stage === "exec"
+        ? await deps.purchases.cancel(activity.id)
+        : await deps.activities.cancel(activity.id),
+    );
+  });
+
   app.get("/v1/activities/:id/events", async (c) => {
     const activityId = c.req.param("id");
     const initial = await deps.activities.get(activityId);

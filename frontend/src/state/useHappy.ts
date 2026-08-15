@@ -12,12 +12,16 @@ const initialState: HappyState = {
   editing: false,
   confirmingWishlistRevert: false,
   wishlistReverting: false,
+  confirmingActivityCancel: false,
+  activityCancelling: false,
   confirmingPurchase: false,
   purchaseSubmitting: false,
   elapsed: 0,
   activities: [],
   running: null,
   viewingArchive: null,
+  activityHistory: null,
+  historyLoading: false,
   wallet: null,
   mandate: null,
   settings: null,
@@ -109,12 +113,18 @@ function reducer(state: HappyState, action: Action): HappyState {
   const current = state.activities.find((activity) => activity.id === action.activityId) ?? null;
   const activity = applyEvent(current, action.event);
   if (!activity) return state;
+  const selected = state.focused === action.activityId;
+  const archived = activity.status !== "live";
   return {
     ...state,
     activities: upsertActivity(state.activities, activity),
-    running: state.running?.id === action.activityId ? activity : state.running,
+    running: state.running?.id === action.activityId ? (archived ? null : activity) : state.running,
     viewingArchive:
-      state.viewingArchive?.id === action.activityId ? activity : state.viewingArchive,
+      selected && archived
+        ? activity
+        : state.viewingArchive?.id === action.activityId
+          ? activity
+          : state.viewingArchive,
   };
 }
 
@@ -126,6 +136,9 @@ export interface HappyActions {
   requestWishlistEdit: () => void;
   cancelWishlistEdit: () => void;
   confirmWishlistEdit: () => Promise<void>;
+  requestActivityCancel: () => void;
+  dismissActivityCancel: () => void;
+  confirmActivityCancel: () => Promise<void>;
   addItem: () => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   approveWishlist: () => Promise<void>;
@@ -144,6 +157,8 @@ export interface HappyActions {
   goScreen: (screen: Screen) => void;
   back: () => void;
   openActivity: (id: string) => Promise<void>;
+  viewActivityHistory: () => Promise<void>;
+  closeActivityHistory: () => void;
   newActivity: () => void;
   jumpToStage: (stage: ActivityStage) => Promise<void>;
   toggleSidebar: () => void;
@@ -241,24 +256,31 @@ export function useHappy(): Happy {
 
   const actions = useMemo<HappyActions>(() => {
     /** Updates the selected activity while retaining every other live activity. */
-    const applied = (activity: Activity) =>
+    const applied = (activity: Activity) => {
+      const archived = activity.status !== "live";
       set({
         activities: upsertActivity(stateRef.current.activities, activity),
-        running: activity,
-        viewingArchive: null,
+        running: archived ? null : activity,
+        viewingArchive: archived ? activity : null,
+        activityHistory: null,
         focused: activity.id,
         error: null,
       });
+    };
 
     const showNewActivity = () => {
       set({
         screen: "purchase",
         focused: null,
         viewingArchive: null,
+        activityHistory: null,
+        historyLoading: false,
         draft: "",
         editing: false,
         confirmingWishlistRevert: false,
         wishlistReverting: false,
+        confirmingActivityCancel: false,
+        activityCancelling: false,
       });
       void Api.listActivities()
         .then((activities) =>
@@ -303,6 +325,24 @@ export function useHappy(): Happy {
           });
         } catch (error) {
           set({ wishlistReverting: false });
+          fail(error);
+        }
+      },
+      requestActivityCancel: () => {
+        if (stateRef.current.running?.status === "live") {
+          set({ confirmingActivityCancel: true });
+        }
+      },
+      dismissActivityCancel: () => set({ confirmingActivityCancel: false }),
+      confirmActivityCancel: async () => {
+        const { running, activityCancelling } = stateRef.current;
+        if (!running || activityCancelling) return;
+        set({ activityCancelling: true });
+        try {
+          applied(await Api.cancelActivity(running.id));
+          set({ confirmingActivityCancel: false, activityCancelling: false });
+        } catch (error) {
+          set({ activityCancelling: false });
           fail(error);
         }
       },
@@ -410,12 +450,29 @@ export function useHappy(): Happy {
             focused: activity.id,
             confirmingWishlistRevert: false,
             wishlistReverting: false,
+            confirmingActivityCancel: false,
+            activityCancelling: false,
+            activityHistory: null,
+            historyLoading: false,
             activities: upsertActivity(stateRef.current.activities, activity),
             ...(activity.status === "live"
               ? { running: activity, viewingArchive: null }
               : { viewingArchive: activity }),
           });
         }),
+
+      viewActivityHistory: async () => {
+        const archive = stateRef.current.viewingArchive;
+        if (!archive || stateRef.current.historyLoading) return;
+        set({ historyLoading: true });
+        try {
+          set({ activityHistory: await Api.getActivityHistory(archive.id), historyLoading: false });
+        } catch (error) {
+          set({ historyLoading: false });
+          fail(error);
+        }
+      },
+      closeActivityHistory: () => set({ activityHistory: null }),
 
       newActivity: showNewActivity,
 

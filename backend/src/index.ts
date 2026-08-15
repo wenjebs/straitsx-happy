@@ -22,6 +22,7 @@ import {
   type PurchaseAgentProvider,
   RemotePurchaseAgentProvider,
 } from "./providers/purchaseAgent.js";
+import { resolveWikimediaImage } from "./providers/wikimediaImages.js";
 import { DynamoRepository } from "./repositories/dynamodb.js";
 import { MemoryRepository } from "./repositories/memory.js";
 import type { Repository } from "./repository.js";
@@ -90,7 +91,7 @@ const purchaseAgents: PurchaseAgentProvider =
             : {}),
         })
       : new DisabledPurchaseAgentProvider();
-const activities = new ActivityService(repository, events, planner, scouts);
+const activities = new ActivityService(repository, events, planner, scouts, resolveWikimediaImage);
 const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
 const app = createApp({
   config,
