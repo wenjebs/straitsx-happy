@@ -102,14 +102,32 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+/**
+ * Every browser handed out and not yet released.
+ *
+ * Tracked so a Ctrl-C can close them. A run releases its own browser when it ends, but a process
+ * killed mid-run never gets there, and an AgentCore session bills until it is stopped.
+ */
+const live = new Set<BrowserLike>();
+
+/** Closes every browser still open. Returns how many. */
+export async function stopAllBrowsers(): Promise<number> {
+  const all = [...live];
+  live.clear();
+  await Promise.allSettled(all.map((b) => releaseBrowser(b)));
+  return all.length;
+}
+
 /** AgentCore for a real merchant; a local Chromium for anything on this machine. */
 export async function browserForEnv(): Promise<BrowserLike> {
   if ((process.env.CLOSER_BROWSER ?? "local") === "agentcore") {
-    return startAgentCoreSession({
+    const session = await startAgentCoreSession({
       profile: process.env.AWS_PROFILE ?? "happy",
       region: process.env.AWS_REGION ?? "ap-southeast-1",
       name: "happy-purchase-run",
     });
+    live.add(session);
+    return session;
   }
   const browser = await chromium.launch();
   const context = await browser.newContext();
@@ -117,6 +135,7 @@ export async function browserForEnv(): Promise<BrowserLike> {
     newPage: () => context.newPage(),
     close: () => browser.close(),
   };
+  live.add(like);
   return like;
 }
 
@@ -128,6 +147,7 @@ export async function browserForEnv(): Promise<BrowserLike> {
  * half-hour TTL — three failed runs left three sessions running before it was caught.
  */
 export async function releaseBrowser(browser: BrowserLike): Promise<void> {
+  live.delete(browser);
   const closable = browser as BrowserLike & { close?: () => Promise<void> };
   if (typeof closable.close === "function") await closable.close();
 }
