@@ -242,6 +242,41 @@ export function useHappy(): Happy {
       });
   }, [liveActivityIds, set]);
 
+  /*
+   * A snapshot every three seconds while an activity is live.
+   *
+   * The SSE stream is the fast path and usually the only one that matters, but any gap in it —
+   * a dropped connection, an event applied to state in a way the screen does not re-read — used
+   * to leave the page frozen until someone hit refresh, mid-search or mid-checkout. Re-fetching
+   * the whole activity costs one small GET and reuses the same snapshot path the stream opens
+   * with, so the screen cannot sit stale for longer than one tick.
+   */
+  const runningId = state.running?.id;
+  const runningIsLive = state.running?.status === "live";
+  useEffect(() => {
+    if (!runningId || !runningIsLive || !Api.isLive()) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const activity = await Api.getActivity(runningId);
+        if (!cancelled) {
+          dispatch({
+            type: "event",
+            activityId: runningId,
+            event: { type: "activity.snapshot", activity },
+          });
+        }
+      } catch {
+        /* The stream and the next tick both get another chance; a failed poll changes nothing. */
+      }
+    };
+    const id = setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [runningId, runningIsLive]);
+
   /* Elapsed counter for "t+42s". Ticks off the clock, not off agent events. */
   const startedAt = state.running?.searchStartedAt;
   const searching = state.running?.stage === "search" && state.running.searchPlaying;
