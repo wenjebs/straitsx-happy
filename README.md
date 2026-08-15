@@ -20,12 +20,11 @@ pnpm dev
 
 Requires Node >= 22 and pnpm 11.
 
-That starts three processes:
+That starts two processes:
 
 | | port | |
 |---|---|---|
 | `@happy/api` | 8787 | mandates, `decide()`, ledger, card issuance |
-| `@happy/web` | 5173 | mandate builder, balance, activity feed |
 | `@happy/demo-store` | 4030 | storefront the agent checks out against |
 
 Check it came up:
@@ -41,8 +40,8 @@ curl localhost:8787/v1/health
 
 | | |
 |---|---|
-| `pnpm dev` | all three apps |
-| `pnpm dev:api` / `pnpm dev:web` | one app |
+| `pnpm dev` | all apps |
+| `pnpm dev:api` | just the API |
 | `pnpm test` | vitest, all packages |
 | `pnpm typecheck` | tsc across the workspace |
 | `pnpm lint` / `pnpm format` | biome |
@@ -52,7 +51,6 @@ curl localhost:8787/v1/health
 ```
 apps/
   api/            :8787  hono + zod + better-sqlite3 + viem
-  web/            :5173  vite + react + wagmi
   demo-store/     :4030  hono
 packages/
   pay/                   mandates, decide(), ledger, x402 client, issuer adapter
@@ -60,14 +58,15 @@ packages/
 aa-probe/                ERC-4337 spikes, verified on Fuji
 ```
 
-`packages/pay` holds the payment logic and is consumed in-process — both sides
-are TypeScript in one repo, so HTTP between them would buy nothing. `apps/api`
-is a thin wrapper over the same functions, for the browser's benefit. The mock
-issuer lives behind an `IssuerAdapter` inside `packages/pay` rather than as its
-own service, swapped by the `ISSUER` env var.
+`packages/pay` holds the payment logic and the shopping agent consumes it
+in-process — both sides are TypeScript in one repo, so HTTP between them would
+buy nothing. The mock issuer lives behind an `IssuerAdapter` inside
+`packages/pay` rather than as its own service, swapped by the `ISSUER` env var.
 
-`packages/shared` exists so the API and the web app can't disagree about the
-wire format.
+`apps/api` is currently just a health endpoint and the zod boot-time env
+validation. The HTTP wrapper over `packages/pay` is deferred; it's about 40
+lines over the same functions if something ends up needing it. The user-facing
+chat UI lives in a separate repo.
 
 ## Configuration
 
