@@ -37,6 +37,8 @@ const config: Config = {
   AGENTCORE_JPEG_QUALITY: 60,
   SCOUT_SLOTS_PER_ITEM: 2,
   SCOUT_MAX_TOOL_CALLS: 10,
+  SCOUT_BRAIN: "websearch",
+  SCOUT_MAX_PRODUCT_OPENS: 4,
   OPENAI_MODEL: "gpt-5.6-luna",
   OPENAI_BASE_URL: "https://api.openai.com/v1",
   AGENT_CALLBACK_TOKEN: "callback-secret",

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { StageIndex } from "../domain.js";
 import type { VerifiedMerchant } from "../merchants.js";
 import type { Candidate, ProductDetail } from "./storefront.js";
 
@@ -30,6 +31,12 @@ export interface ScoutItem {
 export interface ScoutTools {
   searchStore(merchantId: string, query: string): Promise<Candidate[]>;
   openProduct(merchantId: string, handle: string): Promise<ProductDetail>;
+  /**
+   * Report a step that is not a navigation, so the tile and the scout feed keep moving while a
+   * brain is thinking or searching off-browser. Optional: a brain that only ever navigates has
+   * nothing to add here.
+   */
+  note?(stage: StageIndex, action: string, url: string): Promise<void>;
 }
 
 export interface ScoutPick {
@@ -42,8 +49,31 @@ export interface ScoutDecision {
   alternates: ScoutPick[];
 }
 
+/** A product page a scout intends to open, named before any browser exists. */
+export interface ScoutCandidate {
+  merchantId: string;
+  handle: string;
+  url: string;
+}
+
 export interface ScoutBrain {
   readonly mode: "openai" | "scripted";
+  /**
+   * Optional off-browser discovery, run for every item at once before any AgentCore session opens.
+   *
+   * Sessions are the scarce resource — four at a time against sixteen tiles — so a brain that finds
+   * its candidates by searching the web must not do that finding from inside a session it waited
+   * minutes to get. Whatever this returns is handed to `decide` as `prefetched`, and the browsers
+   * spend their whole session opening and pricing rather than looking.
+   */
+  find?(input: {
+    item: ScoutItem;
+    merchants: VerifiedMerchant[];
+    budget: ScoutBudget;
+    userId: string;
+    signal: AbortSignal;
+    report(text: string): Promise<void>;
+  }): Promise<ScoutCandidate[]>;
   decide(input: {
     item: ScoutItem;
     merchants: VerifiedMerchant[];
@@ -51,6 +81,7 @@ export interface ScoutBrain {
     tools: ScoutTools;
     userId: string;
     signal: AbortSignal;
+    prefetched?: ScoutCandidate[];
   }): Promise<ScoutDecision | null>;
 }
 
@@ -219,11 +250,7 @@ export class OpenAIScoutBrain implements ScoutBrain {
     return this.fallback.decide(input);
   }
 
-  private async turn(
-    history: unknown[],
-    userId: string,
-    signal: AbortSignal,
-  ): Promise<ToolCall[]> {
+  private async turn(history: unknown[], userId: string, signal: AbortSignal): Promise<ToolCall[]> {
     const response = await (this.options.fetcher ?? fetch)(
       `${this.options.baseUrl.replace(/\/$/, "")}/responses`,
       {
@@ -255,7 +282,12 @@ export class OpenAIScoutBrain implements ScoutBrain {
     const calls: ToolCall[] = [];
     for (const entry of body.output) {
       if (typeof entry !== "object" || entry === null) continue;
-      const item = entry as { type?: unknown; name?: unknown; call_id?: unknown; arguments?: unknown };
+      const item = entry as {
+        type?: unknown;
+        name?: unknown;
+        call_id?: unknown;
+        arguments?: unknown;
+      };
       if (item.type !== "function_call") continue;
       if (typeof item.name !== "string" || typeof item.call_id !== "string") continue;
       let args: Record<string, unknown> = {};
@@ -340,7 +372,8 @@ export class OpenAIScoutBrain implements ScoutBrain {
     const handle = typeof entry.handle === "string" ? entry.handle : "";
     const product = opened.get(key(merchantId, handle));
     if (!product) return null;
-    const why = typeof entry.why === "string" && entry.why.trim() ? entry.why.trim() : "Best match found.";
+    const why =
+      typeof entry.why === "string" && entry.why.trim() ? entry.why.trim() : "Best match found.";
     return { product, why };
   }
 }

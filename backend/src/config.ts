@@ -62,6 +62,14 @@ const Env = z
     STREAM_TOKEN_SECRET: optionalString,
     SCOUT_SLOTS_PER_ITEM: z.coerce.number().int().min(1).max(4).default(2),
     SCOUT_MAX_TOOL_CALLS: z.coerce.number().int().min(2).max(24).default(10),
+    /**
+     * Where a scout finds candidates. `websearch` queries OpenAI's index with the verified hosts as
+     * a domain filter and opens what it returns; `storefront` drives each shop's own search box,
+     * which is slower and goes quiet when a shop throttles the AgentCore egress IP.
+     */
+    SCOUT_BRAIN: z.enum(["websearch", "storefront"]).default("websearch"),
+    /** Product pages a web-search scout opens in the browser per item. Each one is a page load. */
+    SCOUT_MAX_PRODUCT_OPENS: z.coerce.number().int().min(1).max(8).default(4),
     OPENAI_API_KEY: optionalString,
     OPENAI_MODEL: z.string().min(1).default("gpt-5.6-luna"),
     OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),

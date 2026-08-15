@@ -1,10 +1,17 @@
 import type { Activity, ShortlistPick, StageIndex, WishlistItem } from "../domain.js";
+import { logTime, newId } from "../domain.js";
 import { merchantById, merchantsForSlot, type VerifiedMerchant } from "../merchants.js";
+import { mintStreamToken } from "../streamTokens.js";
 import type { ScoutProvider } from "./agent.js";
 import type { AgentCoreBrowser, BrowserSession } from "./agentcoreBrowser.js";
 import { catalogueFallback } from "./fallbackShortlist.js";
-import { relevance, type ScoutBrain, type ScoutDecision, type ScoutPick } from "./scoutBrain.js";
-import { mintStreamToken } from "../streamTokens.js";
+import {
+  relevance,
+  type ScoutBrain,
+  type ScoutCandidate,
+  type ScoutDecision,
+  type ScoutPick,
+} from "./scoutBrain.js";
 import { openProduct, searchStore } from "./storefront.js";
 
 /**
@@ -33,6 +40,9 @@ export interface AgentCoreScoutOptions {
   paymentMinMinor: number;
   paymentMaxMinor: number;
 }
+
+/** Web search is HTTP, not a session, so this only exists to stay polite to the API. */
+const WEB_SEARCH_CONCURRENCY = 6;
 
 const STAGE_ACTIONS: Record<StageIndex, string> = {
   0: "starting a browser session",
@@ -120,10 +130,29 @@ export class AgentCoreScoutProvider implements ScoutProvider {
       }
     }
 
+    /*
+     * Web search first, for the whole wishlist at once.
+     *
+     * This is plain HTTP to OpenAI — no session, no browser — so it does not belong behind the
+     * four-session pool. Running it here means every item has been searched before the first
+     * browser opens, the narration fills the log immediately, and a session is spent entirely on
+     * opening and pricing what the search already found.
+     */
+    const prefetched = new Map<string, ScoutCandidate[]>();
+    if (this.options.brain.find) {
+      await pool(
+        items.map((item) => () => this.findFor(activity, item, slots, prefetched, signal)),
+        WEB_SEARCH_CONCURRENCY,
+      );
+      if (signal.aborted) return;
+    }
+
     const jobs: (() => Promise<SlotResult>)[] = [];
     for (const item of items) {
       for (let slot = 0; slot < slots; slot += 1) {
-        jobs.push(() => this.runSlot(activity, item, slot, slots, signal));
+        jobs.push(() =>
+          this.runSlot(activity, item, slot, slots, prefetched.get(`${item.id}:${slot}`), signal),
+        );
       }
     }
 
@@ -161,11 +190,75 @@ export class AgentCoreScoutProvider implements ScoutProvider {
     await this.post(activity.id, { type: "shortlist.ready", shortlist });
   }
 
+  /**
+   * One web search per item, covering every verified shop, with the results dealt back out to the
+   * slots that own each shop.
+   *
+   * Searching per slot instead would double the calls to say the same thing twice, and the log
+   * would read as two scouts arguing about the same item.
+   */
+  private async findFor(
+    activity: Activity,
+    item: WishlistItem,
+    slots: number,
+    into: Map<string, ScoutCandidate[]>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const brain = this.options.brain;
+    // Bound, not detached: `find` reaches back into the brain for the search call.
+    if (!brain.find) return;
+    const find = brain.find.bind(brain);
+    const bySlot = new Map<string, number>();
+    const merchants: VerifiedMerchant[] = [];
+    for (let slot = 0; slot < slots; slot += 1) {
+      for (const merchant of merchantsForSlot(slot, slots)) {
+        bySlot.set(merchant.id, slot);
+        merchants.push(merchant);
+      }
+    }
+
+    const report = async (text: string) => {
+      await this.log(activity.id, item, text).catch(() => {});
+    };
+
+    const candidates = await find({
+      item: { id: item.id, name: item.name, spec: item.spec, budget: item.budget },
+      merchants,
+      budget: { minMinor: this.options.paymentMinMinor, maxMinor: this.options.paymentMaxMinor },
+      userId: activity.userId,
+      signal,
+      report,
+    }).catch(async (error: unknown) => {
+      await report(`web search failed: ${message(error)}`);
+      return [] as ScoutCandidate[];
+    });
+
+    for (const candidate of candidates) {
+      const slot = bySlot.get(candidate.merchantId) ?? 0;
+      const key = `${item.id}:${slot}`;
+      into.set(key, [...(into.get(key) ?? []), candidate]);
+    }
+  }
+
+  private async log(activityId: string, item: WishlistItem, text: string): Promise<void> {
+    await this.post(activityId, {
+      type: "log.line",
+      line: {
+        id: newId("log"),
+        ts: logTime(),
+        tag: item.short.slice(0, 16),
+        hueIndex: item.hueIndex % 6,
+        text: text.slice(0, 500),
+      },
+    });
+  }
+
   private async runSlot(
     activity: Activity,
     item: WishlistItem,
     slot: number,
     slots: number,
+    prefetched: ScoutCandidate[] | undefined,
     signal: AbortSignal,
   ): Promise<SlotResult> {
     const id = agentId(item.id, slot);
@@ -190,6 +283,8 @@ export class AgentCoreScoutProvider implements ScoutProvider {
         },
       });
       await this.postProgress(activity.id, item.id, next);
+      // A tile shows only its latest action, so the same step goes to the log, where it stays.
+      await this.log(activity.id, item, action).catch(() => {});
     };
 
     try {
@@ -232,6 +327,7 @@ export class AgentCoreScoutProvider implements ScoutProvider {
         },
         userId: activity.userId,
         signal,
+        ...(prefetched && prefetched.length > 0 ? { prefetched } : {}),
         tools: {
           searchStore: async (merchantId, query) => {
             await this.waitIfPaused(activity.id, signal);
@@ -249,6 +345,10 @@ export class AgentCoreScoutProvider implements ScoutProvider {
               );
             }
             return results;
+          },
+          note: async (stage, action, url) => {
+            await this.waitIfPaused(activity.id, signal);
+            await emit(stage, action, url);
           },
           openProduct: async (merchantId, handle) => {
             await this.waitIfPaused(activity.id, signal);
@@ -268,6 +368,13 @@ export class AgentCoreScoutProvider implements ScoutProvider {
         decision ? `picked ${decision.pick.product.title}` : "nothing here fits the band",
         decision ? new URL(decision.pick.product.url).host : merchants[0]?.host || "",
       );
+      await this.log(
+        activity.id,
+        item,
+        decision
+          ? `${decision.pick.product.host} · ${decision.pick.product.title} · S$${(decision.pick.product.priceMinor / 100).toFixed(2)}`
+          : `nothing on ${merchants[0]?.host ?? "this scout's shops"} fits the card's band`,
+      ).catch(() => {});
       return { itemId: item.id, decision };
     } catch (error) {
       if (signal.aborted) return { itemId: item.id, decision: null };

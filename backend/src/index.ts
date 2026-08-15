@@ -12,11 +12,6 @@ import {
 import { AgentCoreBrowser } from "./providers/agentcoreBrowser.js";
 import { AgentCoreScoutProvider } from "./providers/agentcoreScout.js";
 import {
-  OpenAIScoutBrain,
-  type ScoutBrain,
-  ScriptedScoutBrain,
-} from "./providers/scoutBrain.js";
-import {
   type CardProvider,
   DisabledCardProvider,
   LocalCardProvider,
@@ -30,6 +25,8 @@ import {
   type PurchaseAgentProvider,
   RemotePurchaseAgentProvider,
 } from "./providers/purchaseAgent.js";
+import { OpenAIScoutBrain, type ScoutBrain, ScriptedScoutBrain } from "./providers/scoutBrain.js";
+import { WebSearchScoutBrain } from "./providers/webSearchBrain.js";
 import { resolveWikimediaImage } from "./providers/wikimediaImages.js";
 import { DynamoRepository } from "./repositories/dynamodb.js";
 import { MemoryRepository } from "./repositories/memory.js";
@@ -162,14 +159,25 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 export { app };
 
 function createAgentCoreScouts(): ScoutProvider {
-  const brain: ScoutBrain = config.OPENAI_API_KEY
-    ? new OpenAIScoutBrain({
-        apiKey: config.OPENAI_API_KEY,
-        model: config.OPENAI_MODEL,
-        baseUrl: config.OPENAI_BASE_URL,
-        maxToolCalls: config.SCOUT_MAX_TOOL_CALLS,
-      })
-    : new ScriptedScoutBrain();
+  /*
+   * Discovery runs on web search, not on each shop's own search box. SCOUT_BRAIN=storefront puts
+   * the tool-calling brain back if a shop's own index turns out to be the better source.
+   */
+  const brain: ScoutBrain = !config.OPENAI_API_KEY
+    ? new ScriptedScoutBrain()
+    : config.SCOUT_BRAIN === "storefront"
+      ? new OpenAIScoutBrain({
+          apiKey: config.OPENAI_API_KEY,
+          model: config.OPENAI_MODEL,
+          baseUrl: config.OPENAI_BASE_URL,
+          maxToolCalls: config.SCOUT_MAX_TOOL_CALLS,
+        })
+      : new WebSearchScoutBrain({
+          apiKey: config.OPENAI_API_KEY,
+          model: config.OPENAI_MODEL,
+          baseUrl: config.OPENAI_BASE_URL,
+          maxProductOpens: config.SCOUT_MAX_PRODUCT_OPENS,
+        });
   return new AgentCoreScoutProvider({
     browser: new AgentCoreBrowser({
       region: config.AWS_REGION,
