@@ -121,9 +121,15 @@ production cardapi = **real money**.
 
 ## Working style here
 
-Weekend hackathon, not a maintained library. Only money-path defects justify a fix round —
-double payment, lost payments, spending past the mandate, leaked card material. Coverage gaps,
-test ergonomics and style get logged and skipped.
+Weekend hackathon, not a maintained library. **Get the shortest working path running first.**
+No scalability, no extensibility, no abstraction for a second case that will never arrive. A
+demo that runs beats a design you can defend.
+
+Only money-path defects justify a fix round — double payment, lost payments, spending past the
+mandate, leaked card material, or reporting an order that never charged. Coverage gaps, test
+ergonomics, style and architecture debates get logged and skipped.
+
+If you have written two design documents and no code, you are doing it wrong.
 
 **Everyone commits straight to `main` with plain `git commit`.** No branches, no Graphite, no
 stacked PRs — several people work in this repo at once and the ceremony costs more than it
