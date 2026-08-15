@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Activity, Listing, Mandate, Settings, WishlistItem } from "../domain.js";
+import type { Activity, Listing, Mandate, WishlistItem } from "../domain.js";
 import { HttpError } from "../errors.js";
 
 export interface IssueCardRequest {
@@ -7,7 +7,6 @@ export interface IssueCardRequest {
   item: WishlistItem;
   listing: Listing;
   mandate: Mandate;
-  settings: Settings;
   idempotencyKey: string;
 }
 
@@ -69,7 +68,7 @@ export class RemoteCardProvider implements CardProvider {
       amountMinor: request.listing.amountMinor,
       currency: "SGD",
       merchant: request.listing.seller,
-      sandbox: request.settings.sandbox,
+      sandbox: false,
       idempotencyKey: request.idempotencyKey,
       mandate: request.mandate,
     });
@@ -114,12 +113,6 @@ export class LocalCardProvider implements CardProvider {
   constructor(private readonly publicBaseUrl: string) {}
 
   async issueCard(request: IssueCardRequest): Promise<IssuedCard> {
-    if (!request.settings.sandbox) {
-      throw new HttpError(
-        409,
-        "Local card failsafe only runs in Sandbox mode. Enable Sandbox mode or configure the real StraitsX card provider.",
-      );
-    }
     const existing = this.issued.get(request.idempotencyKey);
     if (existing) return structuredClone(existing);
     const cardId = `local-card-${crypto.randomUUID()}`;

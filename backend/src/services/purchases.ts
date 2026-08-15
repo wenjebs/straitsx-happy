@@ -50,21 +50,11 @@ export class PurchaseService {
       throw new HttpError(503, "The Closer purchase agent is not configured.");
     }
 
-    const [mandate, settings, wallet] = await Promise.all([
+    const [mandate, wallet] = await Promise.all([
       this.repository.getMandate(activity.userId),
-      this.repository.getSettings(activity.userId),
       this.repository.getWallet(activity.userId),
     ]);
     this.assertMandate(activity, mandate, wallet);
-    if (
-      (this.cards.mode === "local" || this.purchaseAgents.mode === "local") &&
-      !settings.sandbox
-    ) {
-      throw new HttpError(
-        409,
-        "Local payment failsafes require Sandbox mode. Enable it in Settings before purchasing.",
-      );
-    }
 
     const claim = await this.repository.claimPurchase(activityId, idempotencyKey);
     if (!claim.claimed) {
@@ -248,19 +238,14 @@ export class PurchaseService {
     const item = pick && activity.wishlist.find((row) => row.id === pick.itemId);
     const listing = pick && [pick.listing, ...(pick.alternates ?? [])][run.candidateIndex];
     if (!item || !listing) throw new HttpError(409, "Purchase cursor is no longer valid.");
-    const [mandate, settings, wallet] = await Promise.all([
+    const [mandate, wallet] = await Promise.all([
       this.repository.getMandate(activity.userId),
-      this.repository.getSettings(activity.userId),
       this.repository.getWallet(activity.userId),
     ]);
     this.assertListing(item, listing, mandate);
     if (listing.amountMinor > wallet.balanceMinor) {
       throw new HttpError(422, "Wallet balance is below the exact card amount.");
     }
-    if (this.cards.mode === "local" && !settings.sandbox) {
-      throw new HttpError(409, "Local card claims require Sandbox mode.");
-    }
-
     const attemptKey = `${run.idempotencyKey}:${item.id}:${run.candidateIndex}:${run.attemptIndex}`;
     const firstClaim = !run.cardClaimedAt;
     const card = await this.cards.issueCard({
@@ -268,7 +253,6 @@ export class PurchaseService {
       item,
       listing,
       mandate,
-      settings,
       idempotencyKey: attemptKey,
     });
     if (run.cardId && run.cardId !== card.cardId) {
@@ -308,10 +292,7 @@ export class PurchaseService {
       this.repository.getPurchaseRun(activityId),
     ]);
     if (run?.status !== "running" || activity.status !== "live" || run.attemptId) return;
-    const [mandate, settings] = await Promise.all([
-      this.repository.getMandate(activity.userId),
-      this.repository.getSettings(activity.userId),
-    ]);
+    const mandate = await this.repository.getMandate(activity.userId);
 
     while (run.itemIndex < activity.shortlist.length) {
       const pick = activity.shortlist[run.itemIndex];
@@ -368,7 +349,7 @@ export class PurchaseService {
             currency: "SGD",
             expiresAt: grantExpiresAt,
           },
-          sandbox: settings.sandbox,
+          sandbox: this.cards.mode === "local" || this.purchaseAgents.mode === "local",
           idempotencyKey: attemptKey,
         });
         return;
@@ -507,12 +488,6 @@ export class PurchaseService {
       throw new HttpError(
         422,
         `Mandate denied ${item.name}: ${listing.price} exceeds the per-item cap ${formatMinor(itemCapMinor)}.`,
-      );
-    }
-    if ((mandate.categoryRules[item.category ?? "General"] ?? "allowed") === "blocked") {
-      throw new HttpError(
-        422,
-        `Mandate denied ${item.name}: category ${item.category} is blocked.`,
       );
     }
     if (

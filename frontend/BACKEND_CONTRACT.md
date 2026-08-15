@@ -318,16 +318,15 @@ match, and the submitted `sourceAddress` must match the wallet proof. Wallet/fun
 account identity even before a wallet is connected.
 
 ```jsonc
-// Mandate — caps are whole SGD, matching the slider units, not minor
+// Mandate — caps are whole SGD entered manually, not minor units
 {
   "autoApprove": true,
   "itemCap": 600,
-  "actCap": 2500,
-  "categoryRules": { "Electronics": "allowed", "Apparel": "ask first", "Collectibles": "blocked" }
+  "actCap": 2500
 }
 
 // Settings
-{ "notify": true, "sandbox": true, "region": "Singapore · SGD", "dataRetention": "90 days" }
+{ "region": "Singapore · SGD", "dataRetention": "90 days" }
 
 // Profile
 { "name": "Tricia Lim", "email": "tricia.lim@hey.sg", "initials": "TL",
@@ -433,7 +432,7 @@ What the backend must do:
 - **Honour `idempotencyKey`.** If the same key arrives twice, return the existing
   execution rather than starting a second one. A refresh mid-flight or a
   duplicate submission must not buy twice.
-- Check the mandate (`itemCap`, `actCap`, `categoryRules`) before issuing
+- Check the mandate (`itemCap`, `actCap`) before issuing
   anything, and reject with a readable message if it fails.
 - Issue cards at exactly the approved amount, so an agent cannot overspend a card
   it holds.

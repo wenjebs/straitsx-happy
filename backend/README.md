@@ -150,7 +150,8 @@ Closer's card-claim request and does not store the token.
 ## Closer API Happy calls
 
 Happy sends `POST /v1/purchase-runs` with `activityId`, `attemptId`, the exact selected listing,
-the item, sandbox flag, idempotency key, a `cardGrant`, and a callback `{ url, token }`. An
+the item, a provider-derived local-failsafe flag, idempotency key, a `cardGrant`, and a callback
+`{ url, token }`. This flag is not a user setting. An
 accepted response only means the asynchronous job was queued. No card has been issued yet.
 
 Closer takes the card itself by calling `POST cardGrant.claimUrl` with

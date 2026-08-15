@@ -226,12 +226,9 @@ export interface Mandate {
   autoApprove: boolean;
   itemCap: number;
   actCap: number;
-  categoryRules: Record<string, "allowed" | "ask first" | "blocked">;
 }
 
 export interface Settings {
-  notify: boolean;
-  sandbox: boolean;
   region: string;
   dataRetention: string;
 }

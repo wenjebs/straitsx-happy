@@ -246,7 +246,12 @@ export class DynamoRepository implements Repository {
   }
 
   async getMandate(userId: string): Promise<Mandate> {
-    return this.getState(userId, "MANDATE", defaultMandate);
+    const mandate = await this.getState(userId, "MANDATE", defaultMandate);
+    return {
+      autoApprove: mandate.autoApprove,
+      itemCap: mandate.itemCap,
+      actCap: mandate.actCap,
+    };
   }
 
   async putMandate(userId: string, mandate: Mandate): Promise<void> {
@@ -254,7 +259,11 @@ export class DynamoRepository implements Repository {
   }
 
   async getSettings(userId: string): Promise<Settings> {
-    return this.getState(userId, "SETTINGS", defaultSettings);
+    const settings = await this.getState(userId, "SETTINGS", defaultSettings);
+    return {
+      region: settings.region,
+      dataRetention: settings.dataRetention,
+    };
   }
 
   async putSettings(userId: string, settings: Settings): Promise<void> {

@@ -34,20 +34,16 @@ export const WalletAuthVerifyBody = z.object({
   signature: z.string().regex(/^0x[0-9a-fA-F]+$/, "must be a hexadecimal signature"),
 });
 
-const CategoryRule = z.enum(["allowed", "ask first", "blocked"]);
 export const MandatePatch = z
   .object({
     autoApprove: z.boolean().optional(),
     itemCap: z.number().int().min(1).max(1_000_000).optional(),
     actCap: z.number().int().min(1).max(1_000_000).optional(),
-    categoryRules: z.record(z.string().min(1), CategoryRule).optional(),
   })
   .strict();
 
 export const SettingsPatch = z
   .object({
-    notify: z.boolean().optional(),
-    sandbox: z.boolean().optional(),
     region: z.string().min(1).max(120).optional(),
     dataRetention: z.string().min(1).max(120).optional(),
   })

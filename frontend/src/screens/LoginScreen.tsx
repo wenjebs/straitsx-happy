@@ -77,7 +77,7 @@ export function LoginScreen({
     <main className={styles.page}>
       <section className={styles.story} aria-label="About Happy">
         <div className={styles.brand}>
-          <span className={styles.mark} />
+          <img src="/happy-mascot.png" alt="" className={styles.mark} />
           <span>Happy</span>
         </div>
         <div className={styles.storyBody}>
@@ -102,7 +102,7 @@ export function LoginScreen({
       <section className={styles.auth}>
         <div className={styles.card}>
           <div className={styles.mobileBrand}>
-            <span className={styles.mark} />
+            <img src="/happy-mascot.png" alt="" className={styles.mark} />
             <span>Happy</span>
           </div>
           <div className={styles.heading}>
