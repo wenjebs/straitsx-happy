@@ -1,19 +1,18 @@
-import { CURATOR, ITEMS, type ItemId } from "../../data/catalog";
-import type { HappyState } from "../../state/types";
-import type { Action } from "../../state/useHappy";
+import type { Activity } from "../../lib/Api";
+import { hue } from "../../state/derive";
+import type { HappyActions } from "../../state/useHappy";
 import styles from "./LockedPanel.module.css";
 
 interface LockedPanelProps {
-  state: HappyState;
-  dispatch: React.Dispatch<Action>;
+  activity: Activity;
+  actions: HappyActions;
 }
 
 /** Locked items accumulate visibly, then the run is dispatched. */
-export function LockedPanel({ state, dispatch }: LockedPanelProps) {
-  const locked = Object.keys(state.chosen).flatMap((key) => {
-    const id = key as ItemId;
-    const item = ITEMS.find((i) => i.id === id);
-    const option = CURATOR[id]?.find((o) => o.name === state.chosen[id]);
+export function LockedPanel({ activity, actions }: LockedPanelProps) {
+  const locked = activity.clarifications.flatMap((clarification) => {
+    const item = activity.wishlist.find((w) => w.id === clarification.itemId);
+    const option = clarification.options.find((o) => o.name === clarification.chosen);
     return item && option ? [{ item, option }] : [];
   });
 
@@ -24,7 +23,7 @@ export function LockedPanel({ state, dispatch }: LockedPanelProps) {
         <div className={styles.list}>
           {locked.map(({ item, option }) => (
             <div className={styles.row} key={item.id}>
-              <span className={styles.dot} style={{ background: item.hue }} />
+              <span className={styles.dot} style={{ background: hue(item.hueIndex) }} />
               <span className={styles.name}>
                 {item.name} · {option.name}
               </span>
@@ -36,7 +35,7 @@ export function LockedPanel({ state, dispatch }: LockedPanelProps) {
       <button
         type="button"
         className={styles.dispatch}
-        onClick={() => dispatch({ type: "startSearch" })}
+        onClick={() => void actions.dispatchAgents()}
       >
         Dispatch agents
       </button>

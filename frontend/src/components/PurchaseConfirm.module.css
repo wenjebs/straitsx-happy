@@ -1,0 +1,99 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 16, 18, 0.28);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 10;
+  animation: h-in 160ms ease both;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 20px 22px;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.body {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-wrap: pretty;
+}
+
+.summary {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.total {
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.warning {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.cancel {
+  padding: 9px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.cancel:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.confirm {
+  margin-left: auto;
+  padding: 9px 18px;
+  border: none;
+  border-radius: var(--r-control);
+  background: var(--text-primary);
+  color: var(--surface);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.confirm:hover {
+  background: var(--hover-primary);
+}
+
+.confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

@@ -1,24 +1,24 @@
+import type { ActivityStage } from "../lib/Api";
 import { STAGE_GROUPS } from "../state/derive";
-import type { Stage } from "../state/types";
 import { Chevrons } from "./Chevrons";
 import styles from "./StageBar.module.css";
 
 interface StageBarProps {
-  stage: Stage;
+  stage: ActivityStage;
   fraction: number;
-  onJump: (stage: Stage) => void;
+  onJump: (stage: ActivityStage) => void;
 }
 
 /**
- * Five clickable groups of eight chevrons. Clicking one jumps the flow to that
- * stage with seeded data — a demo affordance to review with the product owner
- * before shipping.
+ * Five groups of eight chevrons. Jumping is a demo affordance; it asks the
+ * backend to move the activity rather than faking client state, and it never
+ * starts a spend.
  */
 export function StageBar({ stage, fraction, onJump }: StageBarProps) {
   return (
     <div className={styles.bar}>
       {STAGE_GROUPS.map((group, gi) => {
-        const active = (group.matches as readonly Stage[]).includes(stage);
+        const active = (group.matches as readonly ActivityStage[]).includes(stage);
         const local = Math.max(0, Math.min(1, fraction * 5 - gi));
         const labelClass = active ? styles.current : local >= 1 ? styles.reached : "";
         return (

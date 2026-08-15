@@ -1,29 +1,31 @@
-import { activeItems } from "../../state/derive";
+import type { Activity } from "../../lib/Api";
+import { hue } from "../../state/derive";
 import type { HappyState } from "../../state/types";
-import type { Action } from "../../state/useHappy";
+import type { HappyActions } from "../../state/useHappy";
 import styles from "./WishlistCard.module.css";
 
 interface WishlistCardProps {
+  activity: Activity;
   state: HappyState;
-  dispatch: React.Dispatch<Action>;
+  actions: HappyActions;
 }
 
 /** Goal decomposition: the proposed wishlist, editable before approval. */
-export function WishlistCard({ state, dispatch }: WishlistCardProps) {
-  const items = activeItems(state);
+export function WishlistCard({ activity, state, actions }: WishlistCardProps) {
+  const cap = state.mandate?.actCap ?? 2500;
 
   return (
     <div className={styles.card}>
       <div className={styles.head}>
         <span className={styles.headTitle}>Proposed wishlist</span>
         <span className={styles.budget}>
-          {`est. S$1,285 · cap S$${state.actCap.toLocaleString("en-SG")}`}
+          {`${activity.wishlistEstimate} · cap S$${cap.toLocaleString("en-SG")}`}
         </span>
       </div>
 
-      {items.map((item) => (
+      {activity.wishlist.map((item) => (
         <div className={styles.row} key={item.id}>
-          <span className={styles.dot} style={{ background: item.hue }} />
+          <span className={styles.dot} style={{ background: hue(item.hueIndex) }} />
           <div className={styles.rowBody}>
             <div className={styles.name}>
               {item.name} — {item.spec.split(",")[0]}
@@ -37,7 +39,7 @@ export function WishlistCard({ state, dispatch }: WishlistCardProps) {
               className={styles.remove}
               title={`Remove ${item.name}`}
               aria-label={`Remove ${item.name}`}
-              onClick={() => dispatch({ type: "removeItem", id: item.id })}
+              onClick={() => void actions.removeItem(item.id)}
             >
               ×
             </button>
@@ -51,9 +53,9 @@ export function WishlistCard({ state, dispatch }: WishlistCardProps) {
             <input
               className={styles.addInput}
               value={state.newItem}
-              onChange={(e) => dispatch({ type: "setNewItem", value: e.target.value })}
+              onChange={(e) => actions.setNewItem(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") dispatch({ type: "addItem" });
+                if (e.key === "Enter") void actions.addItem();
               }}
               placeholder="Add an item, e.g. 240mm AIO cooler"
               aria-label="Add an item"
@@ -61,23 +63,19 @@ export function WishlistCard({ state, dispatch }: WishlistCardProps) {
             <button
               type="button"
               className={styles.secondary}
-              onClick={() => dispatch({ type: "addItem" })}
+              onClick={() => void actions.addItem()}
             >
               Add
             </button>
           </>
         )}
-        <button
-          type="button"
-          className={styles.secondary}
-          onClick={() => dispatch({ type: "toggleEditing" })}
-        >
+        <button type="button" className={styles.secondary} onClick={actions.toggleEditing}>
           {state.editing ? "Done editing" : "Edit list"}
         </button>
         <button
           type="button"
           className={styles.primary}
-          onClick={() => dispatch({ type: "approveWishlist" })}
+          onClick={() => void actions.approveWishlist()}
         >
           Approve &amp; continue
         </button>

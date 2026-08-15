@@ -1,20 +1,26 @@
-import { PROFILE_ROWS } from "../data/catalog";
+import type { Profile } from "../lib/Api";
 import styles from "./ProfileScreen.module.css";
 
-export function ProfileScreen() {
+interface ProfileScreenProps {
+  profile: Profile | null;
+}
+
+export function ProfileScreen({ profile }: ProfileScreenProps) {
+  if (!profile) return <div className={styles.screen} />;
+
   return (
     <div className={styles.screen}>
       <div className={styles.column}>
         <div className={styles.head}>
-          <span className={styles.avatar}>TL</span>
+          <span className={styles.avatar}>{profile.initials}</span>
           <div>
-            <div className={styles.name}>Tricia Lim</div>
-            <div className={styles.meta}>tricia.lim@hey.sg · member since Mar 2026</div>
+            <div className={styles.name}>{profile.name}</div>
+            <div className={styles.meta}>{profile.memberSince}</div>
           </div>
         </div>
 
         <div className={styles.panel}>
-          {PROFILE_ROWS.map((row) => (
+          {profile.rows.map((row) => (
             <div className={styles.row} key={row.k}>
               <span className={styles.key}>{row.k}</span>
               <span className={styles.value}>{row.v}</span>

@@ -1,11 +1,10 @@
 import { Toggle } from "../components/Toggle";
-import type { HappyState } from "../state/types";
-import type { Action } from "../state/useHappy";
+import type { Settings } from "../lib/Api";
 import styles from "./SettingsScreen.module.css";
 
 interface SettingsScreenProps {
-  state: HappyState;
-  dispatch: React.Dispatch<Action>;
+  settings: Settings | null;
+  onToggle: (key: "notify" | "sandbox") => void;
 }
 
 const TOGGLES = [
@@ -21,20 +20,22 @@ const TOGGLES = [
   },
 ] as const;
 
-const VALUES = [
-  {
-    name: "Region & currency",
-    desc: "Used for listings, taxes and shipping estimates.",
-    value: "Singapore · SGD",
-  },
-  {
-    name: "Data retention",
-    desc: "How long agent transcripts and screenshots are kept.",
-    value: "90 days",
-  },
-] as const;
+export function SettingsScreen({ settings, onToggle }: SettingsScreenProps) {
+  if (!settings) return <div className={styles.screen} />;
 
-export function SettingsScreen({ state, dispatch }: SettingsScreenProps) {
+  const values = [
+    {
+      name: "Region & currency",
+      desc: "Used for listings, taxes and shipping estimates.",
+      value: settings.region,
+    },
+    {
+      name: "Data retention",
+      desc: "How long agent transcripts and screenshots are kept.",
+      value: settings.dataRetention,
+    },
+  ];
+
   return (
     <div className={styles.screen}>
       <div className={styles.column}>
@@ -47,13 +48,13 @@ export function SettingsScreen({ state, dispatch }: SettingsScreenProps) {
                 <div className={styles.desc}>{row.desc}</div>
               </div>
               <Toggle
-                checked={state.settingsState[row.key]}
-                onChange={() => dispatch({ type: "toggleSetting", key: row.key })}
+                checked={settings[row.key]}
+                onChange={() => onToggle(row.key)}
                 label={row.name}
               />
             </div>
           ))}
-          {VALUES.map((row) => (
+          {values.map((row) => (
             <div className={styles.row} key={row.name}>
               <div className={styles.rowBody}>
                 <div className={styles.name}>{row.name}</div>

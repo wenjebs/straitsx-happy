@@ -1,36 +1,43 @@
-import { CURATOR, ITEMS, type ItemId } from "../../data/catalog";
-import type { HappyState } from "../../state/types";
-import type { Action } from "../../state/useHappy";
+import type { Activity } from "../../lib/Api";
+import { hue } from "../../state/derive";
+import type { HappyActions } from "../../state/useHappy";
 import styles from "./CuratorCard.module.css";
 
 interface CuratorCardProps {
-  itemId: ItemId;
-  state: HappyState;
-  dispatch: React.Dispatch<Action>;
+  itemId: string;
+  activity: Activity;
+  actions: HappyActions;
 }
 
 /** One clarification card per ambiguous item. Choosing locks the option. */
-export function CuratorCard({ itemId, state, dispatch }: CuratorCardProps) {
-  const item = ITEMS.find((i) => i.id === itemId);
-  const options = CURATOR[itemId];
-  if (!item || !options) return null;
+export function CuratorCard({ itemId, activity, actions }: CuratorCardProps) {
+  const item = activity.wishlist.find((w) => w.id === itemId);
+  const clarification = activity.clarifications.find((c) => c.itemId === itemId);
+  if (!item || !clarification) return null;
 
-  const first = options[0];
+  const first = clarification.options[0];
 
   return (
     <div className={styles.wrap}>
       <div className={styles.head}>
-        <span className={styles.dot} style={{ background: item.hue }} />
+        <span className={styles.dot} style={{ background: hue(item.hueIndex) }} />
         <span className={styles.label}>Curator · {item.name}</span>
       </div>
 
       <div className={styles.grid}>
-        {options.map((option) => {
-          const picked = state.chosen[itemId] === option.name;
+        {clarification.options.map((option) => {
+          const picked = clarification.chosen === option.name;
           return (
             <div key={option.name} className={`${styles.option} ${picked ? styles.chosen : ""}`}>
-              <div className={styles.image}>
-                <span className={styles.imageLabel}>{option.imgLabel}</span>
+              <div
+                className={styles.image}
+                style={
+                  option.imageUrl
+                    ? { backgroundImage: `url(${option.imageUrl})`, backgroundSize: "cover" }
+                    : undefined
+                }
+              >
+                {!option.imageUrl && <span className={styles.imageLabel}>{option.imgLabel}</span>}
               </div>
               <div className={styles.body}>
                 <div className={styles.name}>{option.name}</div>
@@ -39,7 +46,7 @@ export function CuratorCard({ itemId, state, dispatch }: CuratorCardProps) {
                 <button
                   type="button"
                   className={`${styles.choose} ${picked ? styles.locked : ""}`}
-                  onClick={() => dispatch({ type: "pick", itemId, option: option.name })}
+                  onClick={() => void actions.choose(itemId, option.name)}
                 >
                   {picked ? "Locked" : "Choose"}
                 </button>
@@ -57,7 +64,7 @@ export function CuratorCard({ itemId, state, dispatch }: CuratorCardProps) {
           type="button"
           className={styles.ghost}
           onClick={() => {
-            if (first) dispatch({ type: "pick", itemId, option: first.name });
+            if (first) void actions.choose(itemId, first.name);
           }}
         >
           You decide

@@ -1,20 +1,11 @@
-import {
-  ACTIVITY_TITLE,
-  AGENT_HOSTS,
-  type Item,
-  STAGE_ACTIONS,
-  STAGES,
-  type StageIndex,
-} from "../data/catalog";
-import { activeItems, type ItemPosition, itemPosition } from "../state/derive";
-import type { HappyState } from "../state/types";
-import type { Action } from "../state/useHappy";
+import type { Activity, AgentState, ItemProgress, WishlistItem } from "../lib/Api";
+import { hue, movedBackward, progressFor, STAGE_LABELS, stageLabel } from "../state/derive";
 import styles from "./SearchScreen.module.css";
 
 interface SearchScreenProps {
-  state: HappyState;
-  dispatch: React.Dispatch<Action>;
-  tickMs: number;
+  activity: Activity;
+  elapsed: number;
+  onTogglePlay: () => void;
 }
 
 /** Lets a lane pass its shared transition string down as a custom property. */
@@ -29,44 +20,32 @@ type CSSVars = React.CSSProperties & Record<`--${string}`, string>;
 const FORWARD = "left 850ms cubic-bezier(.22,.61,.36,1)";
 const BACKWARD = "left 1450ms cubic-bezier(.7,-0.4,.3,1.4)";
 
-/** Position along the track, in percent, for a stage index. */
-function stagePercent(stage: number): number {
-  return (stage / 4) * 100;
-}
-
 /** Nudges the dot left by its own width as it approaches the far end. */
 function offsetLeft(pct: number): string {
   return `calc(${pct}% - ${(pct / 100) * 11}px)`;
 }
 
-export function SearchScreen({ state, dispatch, tickMs }: SearchScreenProps) {
-  const items = activeItems(state);
-  const positions = new Map<string, ItemPosition>(
-    items.map((i) => [i.id, itemPosition(i, state.tick)]),
-  );
+export function SearchScreen({ activity, elapsed, onTogglePlay }: SearchScreenProps) {
+  const items = activity.wishlist;
 
   return (
     <div className={styles.screen}>
       <div className={styles.head}>
         <div>
           <div className="eyebrow">Multi-agent search</div>
-          <h2 className="screen-title">{ACTIVITY_TITLE}</h2>
+          <h2 className="screen-title">{activity.title}</h2>
         </div>
         <div className={styles.headMeta}>
           <span>
-            {items.length} items · {items.length * 2} agents
+            {items.length} items · {activity.agents.length} agents
           </span>
-          <span>t+{Math.round(state.tick * (tickMs / 1000))}s</span>
+          <span>t+{elapsed}s</span>
           <span className={styles.run}>
             <span className={styles.runDot} />
-            {state.playing ? "live" : "paused"}
+            {activity.searchPlaying ? "live" : "paused"}
           </span>
-          <button
-            type="button"
-            className={styles.playToggle}
-            onClick={() => dispatch({ type: "togglePlay" })}
-          >
-            {state.playing ? "pause" : "resume"}
+          <button type="button" className={styles.playToggle} onClick={onTogglePlay}>
+            {activity.searchPlaying ? "pause" : "resume"}
           </button>
         </div>
       </div>
@@ -75,11 +54,15 @@ export function SearchScreen({ state, dispatch, tickMs }: SearchScreenProps) {
         <div className={styles.trackScroll}>
           <div className={styles.trackInner}>
             <div className={styles.stops}>
-              {STAGES.map((label, i) => (
+              {STAGE_LABELS.map((label, i) => (
                 <div
                   key={label}
                   className={`${styles.stop} ${
-                    i === 0 ? styles.stopFirst : i === STAGES.length - 1 ? styles.stopLast : ""
+                    i === 0
+                      ? styles.stopFirst
+                      : i === STAGE_LABELS.length - 1
+                        ? styles.stopLast
+                        : ""
                   }`}
                 >
                   {label}
@@ -88,7 +71,7 @@ export function SearchScreen({ state, dispatch, tickMs }: SearchScreenProps) {
             </div>
 
             <div className={styles.rule}>
-              {STAGES.map((label, i) => (
+              {STAGE_LABELS.map((label, i) => (
                 <span
                   key={label}
                   className={styles.tick}
@@ -97,54 +80,25 @@ export function SearchScreen({ state, dispatch, tickMs }: SearchScreenProps) {
               ))}
             </div>
 
-            {items.map((item) => {
-              const pos = positions.get(item.id);
-              if (!pos) return null;
-              const pct = stagePercent(pos.stage);
-              /* One string, shared verbatim by the dot and its label. */
-              const lane: CSSVars = { "--move": pos.back ? BACKWARD : FORWARD };
-              return (
-                <div className={styles.lane} key={item.id} style={lane}>
-                  <span
-                    className={`${styles.dot} ${pos.waiting ? styles.queued : ""}`}
-                    style={{
-                      left: offsetLeft(pct),
-                      /* Queued dots take the class's white fill instead. */
-                      ...(pos.waiting ? {} : { background: item.hue }),
-                      boxShadow: pos.back
-                        ? `0 0 0 5px color-mix(in oklab, ${item.hue} 22%, transparent)`
-                        : "none",
-                    }}
-                  />
-                  <span
-                    className={`${styles.tag} ${pct > 70 ? styles.tagFlipped : ""} ${
-                      pos.waiting ? styles.tagQueued : ""
-                    }`}
-                    style={{
-                      left: offsetLeft(pct),
-                      ...(pos.waiting ? {} : { color: item.hue }),
-                    }}
-                  >
-                    {item.short}
-                  </span>
-                </div>
-              );
-            })}
+            {items.map((item) => (
+              <Lane key={item.id} item={item} progress={progressFor(activity, item.id)} />
+            ))}
           </div>
         </div>
 
         <div className={styles.legend}>
           {items.map((item) => {
-            const pos = positions.get(item.id);
-            if (!pos) return null;
+            const progress = progressFor(activity, item.id);
             return (
               <div className={styles.legendItem} key={item.id}>
-                <span className={styles.legendChip} style={{ background: item.hue }} />
+                <span className={styles.legendChip} style={{ background: hue(item.hueIndex) }} />
                 <span className={styles.legendName}>{item.name}</span>
                 <span className={styles.legendStage}>
-                  {pos.waiting ? "queued" : STAGES[pos.stage].toLowerCase()}
+                  {!progress || progress.queued
+                    ? "queued"
+                    : stageLabel(progress.stage).toLowerCase()}
                 </span>
-                {pos.back && !pos.waiting && <span className={styles.recheck}>re-check ↩</span>}
+                {movedBackward(progress) && <span className={styles.recheck}>re-check ↩</span>}
               </div>
             );
           })}
@@ -152,50 +106,77 @@ export function SearchScreen({ state, dispatch, tickMs }: SearchScreenProps) {
       </div>
 
       <div className={styles.tiles}>
-        {items.flatMap((item, index) =>
-          [0, 1].map((slot) => {
-            const pos = positions.get(item.id);
-            if (!pos) return null;
-            return (
-              <AgentTile
-                key={`${item.id}-${slot}`}
-                item={item}
-                index={index}
-                slot={slot}
-                position={pos}
-              />
-            );
-          }),
-        )}
+        {activity.agents.map((agent, index) => {
+          const item = items.find((w) => w.id === agent.itemId);
+          return item ? (
+            <AgentTile key={agent.agentId} agent={agent} item={item} index={index} />
+          ) : null;
+        })}
       </div>
     </div>
   );
 }
 
-interface AgentTileProps {
-  item: Item;
-  index: number;
-  /** 0 is the lead agent; 1 trails one stage behind, so items spread out. */
-  slot: number;
-  position: ItemPosition;
+function Lane({ item, progress }: { item: WishlistItem; progress: ItemProgress | undefined }) {
+  const stage = progress?.stage ?? 0;
+  const queued = progress?.queued ?? true;
+  const back = movedBackward(progress);
+  const pct = (stage / 4) * 100;
+  const itemHue = hue(item.hueIndex);
+
+  /*
+   * One string, shared verbatim by the dot and its label. Giving them separate
+   * durations desynchronises label from dot mid-flight and the motion stops
+   * reading, so they read the same custom property rather than each declaring
+   * their own.
+   */
+  const lane: CSSVars = { "--move": back ? BACKWARD : FORWARD };
+
+  return (
+    <div className={styles.lane} style={lane}>
+      <span
+        className={`${styles.dot} ${queued ? styles.queued : ""}`}
+        style={{
+          left: offsetLeft(pct),
+          /* Queued dots take the class's white fill instead. */
+          ...(queued ? {} : { background: itemHue }),
+          boxShadow: back ? `0 0 0 5px color-mix(in oklab, ${itemHue} 22%, transparent)` : "none",
+        }}
+      />
+      <span
+        className={`${styles.tag} ${pct > 70 ? styles.tagFlipped : ""} ${
+          queued ? styles.tagQueued : ""
+        }`}
+        style={{ left: offsetLeft(pct), ...(queued ? {} : { color: itemHue }) }}
+      >
+        {item.short}
+      </span>
+    </div>
+  );
 }
 
-function AgentTile({ item, index, slot, position }: AgentTileProps) {
-  const stage = (slot === 0 ? position.stage : Math.max(0, position.stage - 1)) as StageIndex;
-  const agentId = `ag-${(4100 + index * 17 + slot * 3).toString(16)}`;
-  const url = `${AGENT_HOSTS[item.id]}${slot ? "?p=2" : ""}`;
+function AgentTile({
+  agent,
+  item,
+  index,
+}: {
+  agent: AgentState;
+  item: WishlistItem;
+  index: number;
+}) {
+  const itemHue = hue(item.hueIndex);
   /* Every third tile mocks a result grid; the rest mock a scrolling page. */
-  const isGrid = (index + slot) % 3 === 2;
+  const isGrid = index % 3 === 2;
 
   return (
     <div
-      className={`${styles.tile} ${position.waiting ? styles.tileQueued : ""}`}
-      style={{ borderColor: item.hue }}
+      className={`${styles.tile} ${agent.queued ? styles.tileQueued : ""}`}
+      style={{ borderColor: itemHue }}
     >
       <div className={styles.viewport}>
         <div className={styles.chrome}>
-          <span className={styles.chromeChip} style={{ background: item.hue }} />
-          <span className={styles.url}>{url}</span>
+          <span className={styles.chromeChip} style={{ background: itemHue }} />
+          <span className={styles.url}>{agent.url}</span>
         </div>
 
         {isGrid ? (
@@ -238,13 +219,13 @@ function AgentTile({ item, index, slot, position }: AgentTileProps) {
 
       <div className={styles.tileFoot}>
         <div className={styles.tileFootRow}>
-          <span className={styles.agentId}>{agentId}</span>
+          <span className={styles.agentId}>{agent.agentId}</span>
           <span className={styles.agentStage}>
-            {position.waiting ? "queued" : STAGES[stage].toLowerCase()}
+            {agent.queued ? "queued" : stageLabel(agent.stage).toLowerCase()}
           </span>
         </div>
         <div className={styles.agentAction}>
-          {item.name} · {position.waiting ? "waiting for a slot" : STAGE_ACTIONS[stage]}
+          {item.name} · {agent.action}
         </div>
       </div>
     </div>

@@ -1,17 +1,26 @@
-import { money } from "../data/catalog";
-import { activeItems, listingFor, shortlistTotal } from "../state/derive";
-import type { HappyState } from "../state/types";
-import type { Action } from "../state/useHappy";
+import type { Activity } from "../lib/Api";
+import { formatMinor, hue } from "../state/derive";
 import styles from "./ShortlistScreen.module.css";
 
 interface ShortlistScreenProps {
-  state: HappyState;
-  dispatch: React.Dispatch<Action>;
+  activity: Activity;
+  /** Whole SGD, from the mandate. */
+  actCap: number;
+  onReject: (itemId: string) => void;
+  /** Opens the confirmation — this button never spends directly. */
+  onRequestPurchase: () => void;
+  submitting: boolean;
 }
 
-export function ShortlistScreen({ state, dispatch }: ShortlistScreenProps) {
-  const items = activeItems(state);
-  const total = shortlistTotal(state);
+export function ShortlistScreen({
+  activity,
+  actCap,
+  onReject,
+  onRequestPurchase,
+  submitting,
+}: ShortlistScreenProps) {
+  const total = activity.shortlist.reduce((sum, p) => sum + p.listing.amountMinor, 0);
+  const headroom = Math.max(0, actCap * 100 - total);
 
   return (
     <div className={styles.screen}>
@@ -24,33 +33,45 @@ export function ShortlistScreen({ state, dispatch }: ShortlistScreenProps) {
         </p>
 
         <div className={styles.list}>
-          {items.map((item) => {
-            const listing = listingFor(state, item.id);
-            const rejected = state.rejected[item.id] === true;
+          {activity.shortlist.map((pick) => {
+            const item = activity.wishlist.find((w) => w.id === pick.itemId);
+            if (!item) return null;
             return (
-              <div className={styles.row} key={item.id}>
-                <div className={styles.image}>
-                  <span className={styles.imageLabel}>{item.short.toLowerCase()}</span>
+              <div className={styles.row} key={pick.itemId}>
+                <div
+                  className={styles.image}
+                  style={
+                    pick.listing.imageUrl
+                      ? {
+                          backgroundImage: `url(${pick.listing.imageUrl})`,
+                          backgroundSize: "cover",
+                        }
+                      : undefined
+                  }
+                >
+                  {!pick.listing.imageUrl && (
+                    <span className={styles.imageLabel}>{item.short.toLowerCase()}</span>
+                  )}
                 </div>
                 <div className={styles.body}>
                   <div className={styles.itemRow}>
-                    <span className={styles.dot} style={{ background: item.hue }} />
+                    <span className={styles.dot} style={{ background: hue(item.hueIndex) }} />
                     <span className={styles.itemName}>{item.name}</span>
                   </div>
-                  <div className={styles.listingTitle}>{listing.title}</div>
+                  <div className={styles.listingTitle}>{pick.listing.title}</div>
                   <div className={styles.seller}>
-                    {listing.seller} · {listing.rating}
+                    {pick.listing.seller} · {pick.listing.rating}
                   </div>
-                  <p className={styles.why}>{listing.why}</p>
+                  <p className={styles.why}>{pick.listing.why}</p>
                 </div>
                 <div className={styles.right}>
-                  <div className={styles.price}>{listing.price}</div>
+                  <div className={styles.price}>{pick.listing.price}</div>
                   <button
                     type="button"
                     className={styles.reject}
-                    onClick={() => dispatch({ type: "reject", id: item.id })}
+                    onClick={() => onReject(pick.itemId)}
                   >
-                    {rejected ? "re-searched" : "Reject & re-search"}
+                    {pick.reSearched ? "re-searched" : "Reject & re-search"}
                   </button>
                 </div>
               </div>
@@ -60,21 +81,21 @@ export function ShortlistScreen({ state, dispatch }: ShortlistScreenProps) {
           <div className={styles.foot}>
             <div>
               <div className={styles.totalLabel}>Total</div>
-              <div className={styles.total}>{money(total)}</div>
+              <div className={styles.total}>{formatMinor(total)}</div>
             </div>
             <div className={styles.note}>
               <div>
-                cap S${state.actCap.toLocaleString("en-SG")} / activity · under by{" "}
-                {money(Math.max(0, state.actCap - total))}
+                cap S${actCap.toLocaleString("en-SG")} / activity · under by {formatMinor(headroom)}
               </div>
               <div>card: single-use XSGD virtual · expires 60 min</div>
             </div>
             <button
               type="button"
               className={styles.confirm}
-              onClick={() => dispatch({ type: "confirmPurchase" })}
+              onClick={onRequestPurchase}
+              disabled={submitting}
             >
-              Confirm &amp; purchase
+              {submitting ? "Placing orders…" : "Confirm & purchase"}
             </button>
           </div>
         </div>

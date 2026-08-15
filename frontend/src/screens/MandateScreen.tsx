@@ -1,15 +1,18 @@
 import { Toggle } from "../components/Toggle";
-import type { HappyState } from "../state/types";
-import type { Action } from "../state/useHappy";
+import type { Mandate } from "../lib/Api";
 import styles from "./MandateScreen.module.css";
 
 interface MandateScreenProps {
-  state: HappyState;
-  dispatch: React.Dispatch<Action>;
+  mandate: Mandate | null;
+  onChange: (changes: Partial<Mandate>) => void;
 }
 
+const CYCLE = ["allowed", "ask first", "blocked"] as const;
+
 /** What agents may spend without asking. The caps feed the wishlist and shortlist. */
-export function MandateScreen({ state, dispatch }: MandateScreenProps) {
+export function MandateScreen({ mandate, onChange }: MandateScreenProps) {
+  if (!mandate) return <div className={styles.screen} />;
+
   return (
     <div className={styles.screen}>
       <div className={styles.column}>
@@ -28,8 +31,8 @@ export function MandateScreen({ state, dispatch }: MandateScreenProps) {
               </div>
             </div>
             <Toggle
-              checked={state.autoApprove}
-              onChange={() => dispatch({ type: "toggleAuto" })}
+              checked={mandate.autoApprove}
+              onChange={() => onChange({ autoApprove: !mandate.autoApprove })}
               label="Auto-approve purchases"
             />
           </div>
@@ -44,12 +47,12 @@ export function MandateScreen({ state, dispatch }: MandateScreenProps) {
               min={100}
               max={1500}
               step={50}
-              value={state.itemCap}
-              onChange={(e) => dispatch({ type: "setItemCap", value: Number(e.target.value) })}
+              value={mandate.itemCap}
+              onChange={(e) => onChange({ itemCap: Number(e.target.value) })}
               className={styles.slider}
               aria-label="Per-item cap"
             />
-            <span className={styles.value}>S${state.itemCap}</span>
+            <span className={styles.value}>S${mandate.itemCap}</span>
           </div>
 
           <div className={styles.row}>
@@ -62,12 +65,12 @@ export function MandateScreen({ state, dispatch }: MandateScreenProps) {
               min={500}
               max={6000}
               step={100}
-              value={state.actCap}
-              onChange={(e) => dispatch({ type: "setActCap", value: Number(e.target.value) })}
+              value={mandate.actCap}
+              onChange={(e) => onChange({ actCap: Number(e.target.value) })}
               className={styles.slider}
               aria-label="Per-activity cap"
             />
-            <span className={styles.value}>S${state.actCap}</span>
+            <span className={styles.value}>S${mandate.actCap}</span>
           </div>
 
           <div className={styles.rules}>
@@ -76,11 +79,18 @@ export function MandateScreen({ state, dispatch }: MandateScreenProps) {
               Optional. Tap to switch a category between allowed, ask first, and blocked.
             </div>
             <div className={styles.chips}>
-              {Object.entries(state.ruleState).map(([name, rule]) => (
+              {Object.entries(mandate.categoryRules).map(([name, rule]) => (
                 <button
                   type="button"
                   key={name}
-                  onClick={() => dispatch({ type: "cycleRule", name })}
+                  onClick={() =>
+                    onChange({
+                      categoryRules: {
+                        ...mandate.categoryRules,
+                        [name]: CYCLE[(CYCLE.indexOf(rule) + 1) % CYCLE.length] ?? "allowed",
+                      },
+                    })
+                  }
                   className={`${styles.chip} ${
                     rule === "allowed" ? styles.allowed : rule === "blocked" ? styles.blocked : ""
                   }`}
