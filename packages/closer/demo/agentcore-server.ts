@@ -27,7 +27,7 @@
  *   AWS_PROFILE=happy pnpm --filter @happy/closer exec tsx demo/agentcore-server.ts
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Page } from "playwright";
+import type { CDPSession, Page } from "playwright";
 import { type AgentCoreSession, startAgentCoreSession } from "../src/agentcore.js";
 
 const PORT = Number(process.env.AGENTCORE_TEST_PORT ?? 4041);
@@ -53,6 +53,9 @@ const PRESETS = [
 /** Fallback only; each slot reads its real innerWidth/innerHeight after every navigation. */
 const VIEWPORT_FALLBACK = { width: 1456, height: 732 };
 
+/** Frame quality for the screencast. High enough to read a checkout, small enough to keep up. */
+const FRAME_QUALITY = Number(process.env.AGENTCORE_FRAME_QUALITY ?? 80);
+
 type Slot = {
   id: string;
   label: string;
@@ -61,6 +64,10 @@ type Slot = {
   startedAt: string;
   viewport: { width: number; height: number };
   lastError: string | null;
+  /** SSE subscribers watching this slot. The screencast runs only while at least one is attached. */
+  clients: Set<ServerResponse>;
+  cdp: CDPSession | null;
+  lastFrame: string | null;
 };
 
 const slots = new Map<string, Slot>();
@@ -75,6 +82,67 @@ async function refreshViewport(slot: Slot) {
       return { width: w.innerWidth, height: w.innerHeight };
     })
     .catch(() => VIEWPORT_FALLBACK);
+}
+
+/**
+ * Streams the remote screen by CDP screencast rather than by polling `page.screenshot()`.
+ *
+ * Polling a full screenshot every 1.5s is a slideshow: each one is a round trip to Singapore, and
+ * the interval has to stay long enough that requests do not pile up. `Page.startScreencast` inverts
+ * it — Chrome pushes a frame whenever the page actually changes, so an idle tab costs nothing and
+ * an animating one arrives at video rate. It is also the same mechanism the AWS console's own view
+ * ultimately relies on.
+ *
+ * Frames are acknowledged individually; Chrome will not send the next one until the last is acked,
+ * which is what stops a slow consumer from drowning.
+ */
+async function startScreencast(slot: Slot) {
+  if (slot.cdp) return;
+  const cdp = await slot.page.context().newCDPSession(slot.page);
+  slot.cdp = cdp;
+
+  cdp.on("Page.screencastFrame", async (evt: { data: string; sessionId: number }) => {
+    slot.lastFrame = evt.data;
+    const payload = `data: ${evt.data}\n\n`;
+    for (const res of slot.clients) {
+      // Drop rather than queue for a backed-up subscriber. At ~40fps across several panes an
+      // unbounded socket buffer turns into seconds of latency and never recovers; a skipped frame
+      // is invisible, a growing backlog is not.
+      if (res.writableLength > 1_000_000) continue;
+      res.write(payload);
+    }
+    // Ack even with no subscribers, or the stream stalls permanently after the last one leaves.
+    await cdp.send("Page.screencastFrameAck", { sessionId: evt.sessionId }).catch(() => {});
+  });
+
+  await cdp
+    .send("Page.startScreencast", {
+      format: "jpeg",
+      quality: FRAME_QUALITY,
+      maxWidth: 1600,
+      maxHeight: 900,
+      everyNthFrame: 1,
+    })
+    .catch((e) => {
+      slot.lastError = `screencast failed: ${e.message}`;
+    });
+}
+
+async function stopScreencast(slot: Slot) {
+  if (!slot.cdp) return;
+  await slot.cdp.send("Page.stopScreencast").catch(() => {});
+  await slot.cdp.detach().catch(() => {});
+  slot.cdp = null;
+}
+
+/**
+ * A navigation can leave the screencast attached to a target that no longer paints. Cheaper and
+ * more reliable to restart it than to reason about which navigations survive.
+ */
+async function restartScreencast(slot: Slot) {
+  if (!slot.cdp) return;
+  await stopScreencast(slot);
+  await startScreencast(slot);
 }
 
 function slotStatus(slot: Slot) {
@@ -116,6 +184,9 @@ async function startSlot(label: string, url: string) {
     startedAt: new Date().toISOString(),
     viewport: VIEWPORT_FALLBACK,
     lastError: null,
+    clients: new Set(),
+    cdp: null,
+    lastFrame: null,
   };
   slots.set(id, slot);
 
@@ -134,6 +205,9 @@ async function stopSlot(id: string) {
   const slot = slots.get(id);
   if (!slot) return listStatus();
   slots.delete(id);
+  for (const res of slot.clients) res.end();
+  slot.clients.clear();
+  await stopScreencast(slot).catch(() => {});
   // Stop explicitly rather than letting the TTL run out — the TTL is billed.
   await slot.session.close().catch(() => {});
   return listStatus();
@@ -212,6 +286,7 @@ const actions: Record<string, (slot: Slot, b: Record<string, unknown>) => Promis
   navigate: async (slot, b) => {
     await slot.page.goto(String(b.url), { waitUntil: "domcontentloaded", timeout: 45_000 });
     await refreshViewport(slot);
+    await restartScreencast(slot);
     return slotStatus(slot);
   },
   click: async (slot, b) => {
@@ -232,6 +307,33 @@ const actions: Record<string, (slot: Slot, b: Record<string, unknown>) => Promis
     await slot.page.mouse.wheel(0, Number(b.dy ?? 0));
     return slotStatus(slot);
   },
+  /**
+   * Replays a mouse path the operator actually drew, with their own timing between points.
+   *
+   * A slider captcha is not really asking "did the handle reach the end" — it is asking whether
+   * the motion looks like a hand. Synthesising a straight line at constant speed fails that on
+   * purpose. So the browser captures the real pointer path and we replay it point for point,
+   * preserving the gaps between samples. The gesture is a human's; this only transports it.
+   */
+  drag: async (slot, b) => {
+    const path = (b.path as { x: number; y: number; dt: number }[]) ?? [];
+    if (path.length < 2) throw new Error("drag needs at least two points");
+    const mouse = slot.page.mouse;
+    const first = path[0];
+    if (!first) throw new Error("drag path is empty");
+
+    await mouse.move(first.x, first.y);
+    await mouse.down();
+    for (const p of path.slice(1)) {
+      // Clamped: a paused drag must not hold the connection open for a minute.
+      const wait = Math.min(Math.max(p.dt, 0), 250);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      await mouse.move(p.x, p.y);
+    }
+    await mouse.up();
+    await refreshViewport(slot);
+    return slotStatus(slot);
+  },
   /** Click by accessible name. Blind coordinates do not survive a real storefront's layout. */
   clickText: async (slot, b) => {
     const name = new RegExp(String(b.text), "i");
@@ -242,6 +344,7 @@ const actions: Record<string, (slot: Slot, b: Record<string, unknown>) => Promis
     await target.click({ timeout: Number(b.timeout ?? 15_000) });
     await slot.page.waitForLoadState("domcontentloaded").catch(() => {});
     await refreshViewport(slot);
+    await restartScreencast(slot);
     return slotStatus(slot);
   },
   /** Fill by selector, searching child frames — the same traversal as payWithCard. */
@@ -312,6 +415,36 @@ const server = createServer(async (req, res) => {
         await startSlot(String(body.label ?? "session"), String(body.url ?? "https://example.com/"));
         return send(res, 200, listStatus());
       }
+    }
+
+    // GET /sessions/:id/stream — server-sent events, one JPEG per frame, base64.
+    // SSE rather than a websocket so this stays dependency-free; the channel is one-way anyway,
+    // since input travels back over the ordinary POST actions.
+    if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "stream") {
+      const slot = requireSlot(parts[1]);
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "access-control-allow-origin": ORIGIN,
+        "x-accel-buffering": "no",
+      });
+      slot.clients.add(res);
+      // Seed with the last frame so a new subscriber sees the page immediately rather than waiting
+      // for it to change — an idle page emits nothing at all.
+      if (slot.lastFrame) res.write(`data: ${slot.lastFrame}\n\n`);
+      await startScreencast(slot);
+
+      req.on("close", () => {
+        slot.clients.delete(res);
+        // Leave the cast running briefly rather than tearing down on every React remount.
+        if (slot.clients.size === 0) {
+          setTimeout(() => {
+            if (slot.clients.size === 0) void stopScreencast(slot).catch(() => {});
+          }, 5000);
+        }
+      });
+      return;
     }
 
     // GET /sessions/:id/screenshot

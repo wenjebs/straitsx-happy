@@ -7,7 +7,8 @@ import styles from "./BrowserTestScreen.module.css";
  * It talks to packages/closer/demo/agentcore-server.ts, which holds the CDP connections. It does
  * NOT embed AgentCore's own live view: that endpoint is an Amazon DCV transport, not a web page —
  * a plain GET answers 501 — and the DCV client is a licensed AWS download rather than an npm
- * package. So this polls screenshots over CDP and forwards clicks and keystrokes back.
+ * package. So the server runs a CDP screencast, streams the frames here over SSE, and this
+ * forwards clicks, drags and keystrokes back.
  *
  * Several at once, because "will this merchant admit an AWS datacentre IP" is answered per
  * merchant and not in general. Five panes turn a slow serial question into one screenful.
@@ -17,7 +18,8 @@ import styles from "./BrowserTestScreen.module.css";
  */
 
 const CONTROL_BASE = import.meta.env.VITE_AGENTCORE_URL ?? "http://127.0.0.1:4041";
-const FRAME_MS = 1500;
+/** Only the session list is polled now; frames arrive pushed over SSE. */
+const STATUS_MS = 2000;
 
 type SessionStatus = {
   id: string;
@@ -88,7 +90,7 @@ export function BrowserTestScreen() {
         .then((r) => r.json())
         .then((j: ListStatus) => j.sessions && setList(j))
         .catch(() => {});
-    }, FRAME_MS);
+    }, STATUS_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -182,47 +184,98 @@ function Pane({
   onFocus: () => void;
   onAction: (action: string, body?: unknown) => void;
 }) {
-  const [frame, setFrame] = useState<string | null>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const [frame, setFrame] = useState(false);
+  const [text, setText] = useState("");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Object URLs are revoked as they are replaced, or each pane leaks a blob per tick.
+  /*
+   * Frames arrive pushed, not polled. The server runs a CDP screencast and forwards each JPEG over
+   * SSE, so the pane updates whenever the page actually changes rather than on a timer — an idle
+   * tab costs nothing and an animating one arrives at video rate.
+   *
+   * Frames are painted to a canvas rather than swapped into an <img> src: assigning src decodes
+   * asynchronously and the element blanks between frames, which at this rate reads as flicker.
+   */
   useEffect(() => {
+    const es = new EventSource(`${CONTROL_BASE}/sessions/${session.id}/stream`);
     let alive = true;
-    let current: string | null = null;
 
-    const tick = async () => {
-      try {
-        const res = await fetch(`${CONTROL_BASE}/sessions/${session.id}/screenshot`, {
-          cache: "no-store",
-        });
-        if (!res.ok || !alive) return;
-        const url = URL.createObjectURL(await res.blob());
-        if (!alive) return URL.revokeObjectURL(url);
-        if (current) URL.revokeObjectURL(current);
-        current = url;
-        setFrame(url);
-      } catch {
-        /* a dropped frame is not worth surfacing */
-      }
+    es.onmessage = (e) => {
+      if (!alive) return;
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current;
+        if (!canvas || !alive) return;
+        if (canvas.width !== img.width || canvas.height !== img.height) {
+          canvas.width = img.width;
+          canvas.height = img.height;
+        }
+        canvas.getContext("2d")?.drawImage(img, 0, 0);
+        setFrame(true);
+      };
+      img.src = `data:image/jpeg;base64,${e.data}`;
     };
 
-    void tick();
-    const id = setInterval(tick, FRAME_MS);
     return () => {
       alive = false;
-      clearInterval(id);
-      if (current) URL.revokeObjectURL(current);
+      es.close();
     };
   }, [session.id]);
 
-  /* Map a click on the scaled screenshot back to a pixel in the remote viewport. */
-  const onFrameClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    const img = imgRef.current;
-    if (!img) return;
-    const rect = img.getBoundingClientRect();
-    onAction("click", {
-      x: Math.round(((e.clientX - rect.left) / rect.width) * session.viewport.width),
-      y: Math.round(((e.clientY - rect.top) / rect.height) * session.viewport.height),
+  /* Map a point on the scaled screenshot back to a pixel in the remote viewport. */
+  const toRemote = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.round(((clientX - rect.left) / rect.width) * session.viewport.width),
+      y: Math.round(((clientY - rect.top) / rect.height) * session.viewport.height),
+    };
+  };
+
+  /*
+   * Press, move, release — captured as a real path rather than reduced to two endpoints.
+   *
+   * A slider captcha judges the shape and timing of the motion, not just where it ended, so a
+   * synthesised straight line fails by design. Recording the operator's own pointer samples and
+   * their spacing keeps the gesture human, because it is one. A press that never moves is sent as
+   * an ordinary click.
+   */
+  const drag = useRef<{ x: number; y: number; t: number }[] | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = toRemote(e.clientX, e.clientY);
+    if (!p) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = [{ ...p, t: e.timeStamp }];
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drag.current) return;
+    const p = toRemote(e.clientX, e.clientY);
+    // Cap the sample count: a slow drag can emit hundreds, and the replay would crawl.
+    if (p && drag.current.length < 120) drag.current.push({ ...p, t: e.timeStamp });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const path = drag.current;
+    drag.current = null;
+    if (!path?.length) return;
+    const start = path[0];
+    const end = path[path.length - 1];
+    if (!start || !end) return;
+
+    const moved = Math.hypot(end.x - start.x, end.y - start.y);
+    if (moved < 5 || path.length < 2) {
+      onAction("click", { x: start.x, y: start.y });
+      return;
+    }
+    onAction("drag", {
+      path: path.map((p, i) => ({
+        x: p.x,
+        y: p.y,
+        dt: i === 0 ? 0 : Math.round(p.t - (path[i - 1]?.t ?? p.t)),
+      })),
     });
   };
 
@@ -246,18 +299,66 @@ function Pane({
         </button>
       </header>
 
-      {frame ? (
-        // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the screenshot IS the control surface
-        <img
-          ref={imgRef}
-          src={frame}
-          alt={session.label}
-          className={styles.frame}
-          onClick={onFrameClick}
+      <canvas
+        ref={canvasRef}
+        className={styles.frame}
+        style={frame ? undefined : { display: "none" }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      />
+      {!frame && <div className={styles.placeholder}>waiting for first frame…</div>}
+
+      <div className={styles.paneKeys}>
+        <input
+          className={styles.paneInput}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="click the page first, then type here"
+          spellCheck={false}
+          onKeyDown={(e) => {
+            // Enter sends the text and then a real Enter keypress, which is what a search box
+            // wants. Without this you would have to reach for two buttons for every query.
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            if (text) onAction("type", { text });
+            onAction("key", { key: "Enter" });
+            setText("");
+          }}
         />
-      ) : (
-        <div className={styles.placeholder}>waiting for first frame…</div>
-      )}
+        <button
+          type="button"
+          className={styles.paneBtn}
+          disabled={!text}
+          onClick={() => {
+            onAction("type", { text });
+            setText("");
+          }}
+        >
+          type
+        </button>
+        <button
+          type="button"
+          className={styles.paneBtn}
+          onClick={() => onAction("key", { key: "Enter" })}
+        >
+          ⏎
+        </button>
+        <button
+          type="button"
+          className={styles.paneBtn}
+          onClick={() => onAction("scroll", { dy: 400 })}
+        >
+          ↓
+        </button>
+        <button
+          type="button"
+          className={styles.paneBtn}
+          onClick={() => onAction("scroll", { dy: -400 })}
+        >
+          ↑
+        </button>
+      </div>
 
       <footer className={styles.paneFoot}>
         <span className={styles.paneUrl} title={session.url}>
