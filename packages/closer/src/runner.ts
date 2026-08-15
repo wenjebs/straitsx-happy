@@ -80,11 +80,30 @@ export function createCloser(deps: CloserDeps) {
 
     // Strictly sequential: the contract requires it (§6) and so does the rail — the shared rate
     // limit is roughly a dozen POSTs for the whole venue.
+    let aborted = false;
     for (const [i, sel] of req.selections.entries()) {
+      const hue = sel.hueIndex ?? i % 6;
+      if (aborted) {
+        items.push({ itemId: sel.itemId, status: "skipped", reason: "RUN_ABORTED" });
+        continue;
+      }
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 0, state: "queued" } });
-      items.push(
-        await buyOne(sel, sel.tag ?? sel.itemId.toUpperCase(), sel.hueIndex ?? i % 6, log, rec),
-      );
+      let r: { outcome: ItemOutcome; abort?: boolean };
+      try {
+        r = await buyOne(sel, sel.tag ?? sel.itemId.toUpperCase(), hue, log, rec);
+      } catch (err) {
+        // buyOne only throws on a defect. Record it and stop: letting it escape would reject run()
+        // with the journal still "running", which loses the record and blocks the activity forever.
+        log("SYS", hue, `${sel.itemId} · runner error · ${reasonText(err)}`);
+        r = {
+          outcome: { itemId: sel.itemId, status: "unknown", reason: "RUNNER_ERROR" },
+          abort: true,
+        };
+      }
+      items.push(r.outcome);
+      // An unknown settlement almost always means the rail is down, rate-limited or the wallet is
+      // dry. Continuing would be safe for the ledger and pointless in practice.
+      if (r.abort) aborted = true;
     }
 
     const totalMinor = items
@@ -97,9 +116,9 @@ export function createCloser(deps: CloserDeps) {
       totalMinor,
       startedAt,
       finishedAt: new Date(now()).toISOString(),
-      aborted: false,
+      aborted,
     };
-    rec.state = "finished";
+    rec.state = aborted ? "aborted" : "finished";
     rec.result = result;
     journal.write(rec);
     deps.onEvent({ type: "wallet.dirty" });
@@ -113,7 +132,7 @@ export function createCloser(deps: CloserDeps) {
     hue: number,
     log: (tag: string, hue: number, text: string) => void,
     rec: JournalRecord,
-  ): Promise<ItemOutcome> {
+  ): Promise<{ outcome: ItemOutcome; abort?: boolean }> {
     const url = new URL(sel.url);
     const adapter = adapters.find((a) => a.matches(url));
     const item: JournalItem = { itemId: sel.itemId, state: "skipped" };
@@ -129,7 +148,7 @@ export function createCloser(deps: CloserDeps) {
     };
 
     if (!adapter)
-      return skip("NO_ADAPTER", `${sel.itemId} skipped · no adapter for ${url.hostname}`);
+      return { outcome: skip("NO_ADAPTER", `${sel.itemId} skipped · no adapter for ${url.hostname}`) };
 
     const deadlineAt = now() + preIssueBudgetMs;
     const page = await deps.browser.newPage();
@@ -150,13 +169,13 @@ export function createCloser(deps: CloserDeps) {
         try {
           total = await reach();
         } catch (err) {
-          return skip("PRECHECK_FAILED", `${sel.itemId} skipped · ${reasonText(err)}`);
+          return { outcome: skip("PRECHECK_FAILED", `${sel.itemId} skipped · ${reasonText(err)}`) };
         }
       }
       if (!Number.isInteger(total) || total <= 0)
-        return skip("TOTAL_UNREADABLE", `${sel.itemId} skipped · could not read a total`);
+        return { outcome: skip("TOTAL_UNREADABLE", `${sel.itemId} skipped · could not read a total`) };
       if (now() > deadlineAt)
-        return skip("TIMEOUT_PRE_ISSUE", `${sel.itemId} skipped · took too long before issuing`);
+        return { outcome: skip("TIMEOUT_PRE_ISSUE", `${sel.itemId} skipped · took too long before issuing`) };
 
       const here = new URL(page.url());
       // The merchant host comes from the URL, never from page content. Spec §12.
@@ -166,17 +185,18 @@ export function createCloser(deps: CloserDeps) {
 
       // --- Z2: the mandate decides. Still no money moved. -------------------------------------
       const m = await pay.getMandate();
-      if (!m) return skip("MANDATE_INACTIVE", `${sel.itemId} skipped · no active mandate`);
+      if (!m)
+        return { outcome: skip("MANDATE_INACTIVE", `${sel.itemId} skipped · no active mandate`) };
       if (total < m.limits.minCardCents)
-        return skip(
+        return { outcome: skip(
           "BELOW_RAIL_MINIMUM",
           `${sel.itemId} skipped · ${sgd(total)} is under the ${sgd(m.limits.minCardCents)} card floor`,
-        );
+        ) };
       if (total > m.limits.maxCardCents)
-        return skip(
+        return { outcome: skip(
           "ABOVE_RAIL_MAXIMUM",
           `${sel.itemId} skipped · ${sgd(total)} is over the ${sgd(m.limits.maxCardCents)} card ceiling`,
-        );
+        ) };
 
       const quote = {
         amountCents: total,
@@ -187,12 +207,12 @@ export function createCloser(deps: CloserDeps) {
       const d = await pay.evaluate(quote);
       if (d.decision === "NEEDS_HUMAN")
         // No endpoint in BACKEND_CONTRACT.md can call approve(), and the run is unattended.
-        return skip(
+        return { outcome: skip(
           "NEEDS_HUMAN",
           `${sel.itemId} skipped · ${sgd(total)} needs a human (${d.reason})`,
-        );
+        ) };
       if (d.decision === "DENY")
-        return skip(d.reason, `${sel.itemId} skipped · mandate says ${d.reason}`);
+        return { outcome: skip(d.reason, `${sel.itemId} skipped · mandate says ${d.reason}`) };
 
       item.state = "reserving";
       journal.write(rec);
@@ -200,10 +220,10 @@ export function createCloser(deps: CloserDeps) {
       try {
         purchase = await pay.reserve(quote);
       } catch (err) {
-        return skip(
+        return { outcome: skip(
           mandateReason(err) ?? "RESERVE_FAILED",
           `${sel.itemId} skipped · could not hold budget (${reasonText(err)})`,
-        );
+        ) };
       }
       item.state = "reserved";
       item.purchaseId = purchase.id;
@@ -224,10 +244,10 @@ export function createCloser(deps: CloserDeps) {
         again > m.limits.maxCardCents;
       if (bad) {
         await pay.cancel(purchase.id, "price_changed"); // RESERVED → RELEASED; the last free exit
-        return skip(
+        return { outcome: skip(
           "PRICE_CHANGED",
           `${sel.itemId} skipped · total moved to ${again === null ? "unreadable" : sgd(again)}`,
-        );
+        ) };
       }
       const finalCents = again;
 
@@ -235,14 +255,87 @@ export function createCloser(deps: CloserDeps) {
       item.state = "issuing";
       journal.write(rec);
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 2, state: "live" } });
-      const card = await pay.issueCard(purchase.id, finalCents);
+
+      let card: { last4: string | null; expiresAt: string | null; settlementTx: string | null };
+      try {
+        card = await pay.issueCard(purchase.id, finalCents);
+      } catch (err) {
+        // The error cannot tell us whether anything was sent. The ledger can.
+        const state = (await pay.getPurchase(purchase.id))?.state;
+        if (state === "RESERVED") {
+          // markPaying() runs before send(), so nothing was transmitted.
+          await pay.cancel(purchase.id, "issue_failed");
+          return {
+            outcome: skip(
+              "ISSUE_REFUSED",
+              `${sel.itemId} skipped · card not issued (${reasonText(err)})`,
+            ),
+          };
+        }
+        if (state === "PAYING") {
+          // Invariant 4: nobody knows whether the money left. cancel() would throw, and calling it
+          // would be a bug rather than a safety net. @happy/pay's reconciler owns this purchase.
+          item.state = "unknown";
+          journal.write(rec);
+          log(
+            "SYS",
+            hue,
+            `settlement outcome unknown · run stopped · reconciler will resolve ${purchase.id}`,
+          );
+          return {
+            outcome: {
+              itemId: sel.itemId,
+              status: "unknown",
+              reason: "SETTLEMENT_UNKNOWN",
+              purchaseId: purchase.id,
+              amountMinor: finalCents,
+            },
+            abort: true,
+          };
+        }
+        if (state !== "CARD_ISSUED") throw err; // unreachable in pay's state machine; don't guess
+        // A card exists and the money is gone. The only useful move is to go and get the goods.
+        card = { last4: null, expiresAt: null, settlementTx: null };
+      }
       log(tag, hue, `card ${mask(card.last4)} issued · limit ${sgd(finalCents)}`);
 
-      // --- Z5/Z6: no way back. -----------------------------------------------------------------
+      // --- Z5/Z6: no way back. Either get the goods, or record the loss. -----------------------
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 3, state: "live" } });
       log(tag, hue, `${merchantHost}${here.pathname} · placing order ${sgd(finalCents)}`);
-      const res = await pay.payWithCard(page, purchase.id, checkoutOptsFor(adapter));
-      const orderRef = res.orderRef ?? null;
+      let res: { ok: boolean; orderRef?: string; error?: string };
+      try {
+        res = await pay.payWithCard(page, purchase.id, checkoutOptsFor(adapter));
+      } catch {
+        res = { ok: false, error: "CHECKOUT_THREW" };
+      }
+
+      // An unknown outcome is a failure (invariant 8), and `ok` is the whole answer: the library
+      // has already settled declines and refused to invent a reference.
+      const orderRef = res.ok ? (res.orderRef ?? null) : null;
+      if (!orderRef) {
+        // No refunds exist (invariant 9). cancel() writes STRANDED and keeps the money on the
+        // books. The Closer's job is to make that loud rather than to hide it.
+        const reason = res.error ?? "CHECKOUT_FAILED";
+        await pay.cancel(purchase.id, reason.toLowerCase());
+        item.state = "stranded";
+        journal.write(rec);
+        log(
+          "SYS",
+          hue,
+          `${sgd(finalCents)} spent · no order confirmation · card ${mask(card.last4)} stranded`,
+        );
+        return {
+          outcome: {
+            itemId: sel.itemId,
+            status: "stranded",
+            reason,
+            purchaseId: purchase.id,
+            amountMinor: finalCents,
+            last4: card.last4,
+          },
+        };
+      }
+
       await pay.complete(purchase.id, orderRef);
       item.state = "done";
       item.orderRef = orderRef;
@@ -250,12 +343,14 @@ export function createCloser(deps: CloserDeps) {
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 4, state: "purchased" } });
       log(tag, hue, `order #${orderRef} confirmed · card spent`);
       return {
-        itemId: sel.itemId,
-        status: "purchased",
-        purchaseId: purchase.id,
-        orderRef,
-        amountMinor: finalCents,
-        last4: card.last4,
+        outcome: {
+          itemId: sel.itemId,
+          status: "purchased",
+          purchaseId: purchase.id,
+          orderRef,
+          amountMinor: finalCents,
+          last4: card.last4,
+        },
       };
     } finally {
       await page.close().catch(() => {});
