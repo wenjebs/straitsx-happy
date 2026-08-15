@@ -50,9 +50,19 @@ class Agents implements PurchaseAgentProvider {
   readonly cancelled: PurchaseAgentCancelRequest[] = [];
   /** Item ids that should fail to dispatch, to prove one bad item does not sink the rest. */
   failFor = new Set<string>();
+  /** Item ids whose dispatch hangs, to open the window a callback can arrive in. */
+  hangFor = new Set<string>();
+  private release: (() => void)[] = [];
+  releaseHung() {
+    for (const r of this.release) r();
+    this.release = [];
+  }
   async startPurchase(request: PurchaseAgentRequest): Promise<void> {
     if (this.failFor.has(request.item.id)) throw new Error("merchant refused the job");
     this.started.push(request);
+    if (this.hangFor.has(request.item.id)) {
+      await new Promise<void>((resolve) => this.release.push(resolve));
+    }
   }
   async cancelPurchase(request: PurchaseAgentCancelRequest): Promise<void> {
     this.cancelled.push(request);
@@ -206,6 +216,79 @@ describe("buying several items at once", () => {
     expect(new Set(agents.started.map((r) => r.item.id))).toEqual(
       new Set(["cleanser", "chew-toy"]),
     );
+  });
+
+  /*
+   * The defect an adversarial review found and reproduced, at a cost of real money: startAttempts
+   * held one run snapshot across the dispatch await and wrote it again afterwards, erasing the card
+   * fields a concurrent claimCard had persisted. The card had been minted and the merchant charged,
+   * but confirmOrder then refused the order for having no card — a successful purchase reported as
+   * a failure, with a stranded card nothing would ever mark dead.
+   */
+  it("keeps a card claimed while a sibling was still dispatching", async () => {
+    const { purchases, agents, repository } = await harness();
+    agents.hangFor.add("chew-toy");
+    void purchases.start("act_par", "key-1");
+    await settle();
+
+    const cleanser = agents.started.find((r) => r.item.id === "cleanser");
+    if (!cleanser) throw new Error("cleanser attempt missing");
+
+    // Claim while the sibling's dispatch is still outstanding — the exact window.
+    await purchases.claimCard("act_par", cleanser.attemptId, cleanser.cardGrant.token);
+    agents.releaseHung();
+    await settle();
+    await settle();
+
+    const run = await repository.getPurchaseRun("act_par");
+    const attempt = run?.attempts[cleanser.attemptId];
+    expect(attempt?.cardLast4, "card claim was erased by a stale write").toBeTruthy();
+    expect(attempt?.cardClaimedAt).toBeTruthy();
+  });
+
+  /*
+   * Six attempts claiming at once each held their own wallet copy across a 45-second issueCard.
+   * Whoever wrote last erased the others' card rows, so the ledger under-reported money that had
+   * genuinely left — and the inflated balance then passed the funds check for the next card.
+   */
+  it("keeps every card row when several attempts claim at once", async () => {
+    const { purchases, agents, repository } = await harness();
+    await purchases.start("act_par", "key-1");
+    await settle();
+
+    await Promise.all(
+      agents.started.map((s) => purchases.claimCard("act_par", s.attemptId, s.cardGrant.token)),
+    );
+
+    const wallet = await repository.getWallet("demo-user");
+    expect(wallet.cards.filter((c) => c.status === "issued")).toHaveLength(3);
+  });
+
+  it("records every debit when several orders confirm at once", async () => {
+    const { purchases, agents, repository } = await harness();
+    await purchases.start("act_par", "key-1");
+    await settle();
+    const before = (await repository.getWallet("demo-user")).balanceMinor;
+
+    for (const s of agents.started) {
+      await purchases.claimCard("act_par", s.attemptId, s.cardGrant.token);
+    }
+    await Promise.all(
+      agents.started.map((s, i) =>
+        purchases.handleAgentEvent("act_par", {
+          eventId: `c-${i}`,
+          attemptId: s.attemptId,
+          itemId: s.item.id,
+          type: "order.confirmed",
+          orderId: `ORD-${i}`,
+        }),
+      ),
+    );
+
+    const wallet = await repository.getWallet("demo-user");
+    // Three items at S$10.00 each. A lost debit shows up here and nowhere else.
+    expect(before - wallet.balanceMinor).toBe(3000);
+    expect(wallet.transactions.filter((t) => t.debit)).toHaveLength(3);
   });
 
   it("completes only once every item has finished", async () => {

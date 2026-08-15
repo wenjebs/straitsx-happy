@@ -18,6 +18,7 @@ import type { CardProvider, IssuedCard } from "../providers/card.js";
 import type { PurchaseAgentProvider } from "../providers/purchaseAgent.js";
 import type { Repository } from "../repository.js";
 import type { PurchaseAgentCallback } from "../schemas.js";
+import { withWallet } from "./walletLock.js";
 
 export class PurchaseService {
   constructor(
@@ -300,19 +301,27 @@ export class PurchaseService {
     attempt.cardLast4 = card.last4;
     attempt.cardClaimedAt ??= new Date().toISOString();
     run.updatedAt = new Date().toISOString();
-    if (!wallet.cards.some((row) => row.pan.endsWith(card.last4))) {
-      wallet.cards.unshift({
-        pan: `•••• •••• ${card.last4}`,
-        amount: listing.price,
-        status: "issued",
-      });
-    }
-    await Promise.all([
-      this.repository.putWallet(activity.userId, wallet),
-      this.repository.putPurchaseRun(run),
-    ]);
+
+    /*
+     * The wallet read above is now stale: `issueCard` can take 45 seconds, and with several
+     * attempts claiming at once each one held its own copy. Whoever wrote last erased the others'
+     * card rows. Re-read inside a per-user lock and mutate that.
+     */
+    const freshWallet = await withWallet(activity.userId, async () => {
+      const current = await this.repository.getWallet(activity.userId);
+      if (!current.cards.some((row) => row.pan.endsWith(card.last4))) {
+        current.cards.unshift({
+          pan: `•••• •••• ${card.last4}`,
+          amount: listing.price,
+          status: "issued",
+        });
+      }
+      await this.repository.putWallet(activity.userId, current);
+      return current;
+    });
+    await this.repository.putPurchaseRun(run);
     if (firstClaim) {
-      this.events.emit(activity.id, { type: "wallet.updated", wallet });
+      this.events.emit(activity.id, { type: "wallet.updated", wallet: freshWallet });
       await this.emitStep(
         activity,
         item,
@@ -395,11 +404,20 @@ export class PurchaseService {
       );
     }
 
+    // Persisted BEFORE dispatch, and this is the only write of this snapshot.
+    //
+    // A Closer can accept a job and call back for its card while a sibling's dispatch is still
+    // outstanding. claimCard then writes that attempt's cardId and cardLast4. Writing this snapshot
+    // AGAIN after the await erased them: the card had really been minted and the merchant really
+    // charged it, but confirmOrder then refused the order for having no card — money gone, purchase
+    // reported as failed. Reproduced. Never write a run object held across an await.
     await this.repository.putPurchaseRun(run);
     // Concurrently: N cold browser starts one after another is the slow path this exists to avoid.
     await Promise.allSettled(starts);
-    await this.repository.putPurchaseRun(run);
-    await this.completeIfDone(activity, run);
+
+    // Re-read, because the run on disk now includes whatever the callbacks wrote while we waited.
+    const fresh = await this.repository.getPurchaseRun(activityId);
+    if (fresh) await this.completeIfDone(activity, fresh);
   }
 
   /** The next candidate listing for an item, skipping any the mandate or the amount rules out. */
@@ -482,8 +500,14 @@ export class PurchaseService {
         item,
         `could not start Closer attempt ${attempt.attemptIndex + 1} · ${asMessage(error)}`,
       );
-      this.progressFor(run, item.id).attemptIndex += 1;
-      this.clearAttempt(run, attempt.attemptId);
+      // Applied to a FRESH run, not to the caller's snapshot. Siblings' callbacks have been writing
+      // to the stored run while this dispatch was outstanding, and persisting a stale copy would
+      // throw their card claims and their completed items away.
+      const fresh = await this.repository.getPurchaseRun(activity.id);
+      if (!fresh || fresh.status !== "running") return;
+      this.progressFor(fresh, item.id).attemptIndex += 1;
+      this.clearAttempt(fresh, attempt.attemptId);
+      await this.repository.putPurchaseRun(fresh);
     }
   }
 
@@ -547,30 +571,39 @@ export class PurchaseService {
     if (!attempt.cardId || !attempt.cardLast4 || !attempt.cardClaimedAt) {
       throw new HttpError(409, "Closer cannot confirm an order before claiming its card.");
     }
-    const wallet = await this.repository.getWallet(activity.userId);
-    const walletCard = wallet.cards.find(
-      (row) => row.pan.endsWith(attempt.cardLast4 ?? "") && row.status === "issued",
-    );
-    if (walletCard) walletCard.status = "used";
-    wallet.balanceMinor -= listing.amountMinor;
-    wallet.transactions.unshift({
-      id: newId("txn"),
-      ts: new Intl.DateTimeFormat("en-SG", {
-        timeZone: "Asia/Singapore",
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(new Date()),
-      label: `Card authorisation · ${listing.seller}`,
-      ref: `order ${orderId}`,
-      amount: `−${listing.price}`,
-      debit: true,
+    /*
+     * Debited under a per-user lock. Two order.confirmed callbacks racing here each read the same
+     * balance, each subtract their own amount, and the second write loses the first debit — the
+     * ledger then under-reports money that has genuinely left, and the inflated balance lets the
+     * next claim pass its own funds check.
+     */
+    const wallet = await withWallet(activity.userId, async () => {
+      const current = await this.repository.getWallet(activity.userId);
+      const walletCard = current.cards.find(
+        (row) => row.pan.endsWith(attempt.cardLast4 ?? "") && row.status === "issued",
+      );
+      if (walletCard) walletCard.status = "used";
+      current.balanceMinor -= listing.amountMinor;
+      current.transactions.unshift({
+        id: newId("txn"),
+        ts: new Intl.DateTimeFormat("en-SG", {
+          timeZone: "Asia/Singapore",
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date()),
+        label: `Card authorisation · ${listing.seller}`,
+        ref: `order ${orderId}`,
+        amount: `−${listing.price}`,
+        debit: true,
+      });
+      await this.repository.putWallet(activity.userId, current);
+      return current;
     });
     pick.listing = listing;
     pick.reSearched = attempt.candidateIndex > 0;
-    await this.repository.putWallet(activity.userId, wallet);
     await this.emitStep(
       activity,
       item,
@@ -637,12 +670,15 @@ export class PurchaseService {
   /** Marks this attempt's card spent-or-dead in the wallet. Never touches another attempt's. */
   private async expireAttemptCard(run: PurchaseRun, attempt: PurchaseAttempt): Promise<void> {
     if (!attempt.cardLast4) return;
-    const wallet = await this.repository.getWallet(run.userId);
-    const card = wallet.cards.find(
-      (row) => row.pan.endsWith(attempt.cardLast4 ?? "") && row.status === "issued",
-    );
-    if (card) card.status = "expired";
-    await this.repository.putWallet(run.userId, wallet);
+    const wallet = await withWallet(run.userId, async () => {
+      const current = await this.repository.getWallet(run.userId);
+      const card = current.cards.find(
+        (row) => row.pan.endsWith(attempt.cardLast4 ?? "") && row.status === "issued",
+      );
+      if (card) card.status = "expired";
+      await this.repository.putWallet(run.userId, current);
+      return current;
+    });
     this.events.emit(run.activityId, { type: "wallet.updated", wallet });
   }
 
