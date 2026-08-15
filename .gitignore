@@ -16,6 +16,7 @@ build/
 *.db-journal
 *.sqlite
 *.sqlite3
+closer-runs/
 
 # raw issuer responses — may contain card material, never commit
 card-responses/
