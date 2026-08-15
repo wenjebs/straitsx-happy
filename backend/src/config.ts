@@ -96,15 +96,23 @@ const Env = z
     PAYMENT_MIN_MINOR: z.coerce.number().int().nonnegative().default(500),
     PAYMENT_MAX_MINOR: z.coerce.number().int().positive().default(3000),
     PAYMENT_ATTEMPTS_PER_LISTING: z.coerce.number().int().min(1).max(5).default(2),
+    /*
+     * Escape hatch for the hosted demo: run the mock card and mock closer on a deployed stack.
+     * No card is ever minted and no value moves, so the flow is a walkthrough, not a purchase.
+     */
+    ALLOW_MOCK_MONEY: z
+      .preprocess((value) => value === "true" || value === true, z.boolean())
+      .default(false),
   })
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV === "production") {
+    if (env.NODE_ENV === "production" && !env.ALLOW_MOCK_MONEY) {
       for (const field of ["PLANNER_MODE", "CARD_MODE", "PURCHASE_AGENT_MODE"] as const) {
         if (env[field] === "local") {
           ctx.addIssue({
             code: "custom",
             path: [field],
-            message: "cannot be local when NODE_ENV=production; configure remote or disabled",
+            message:
+              "cannot be local when NODE_ENV=production; configure remote, disabled, or set ALLOW_MOCK_MONEY=true to demo on mocks",
           });
         }
       }

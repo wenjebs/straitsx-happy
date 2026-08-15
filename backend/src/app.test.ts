@@ -31,6 +31,7 @@ const config: Config = {
   AUTH_MODE: "disabled",
   PLANNER_MODE: "remote",
   SCOUT_MODE: "remote",
+  ALLOW_MOCK_MONEY: false,
   AGENTCORE_BROWSER_ID: "aws.browser.v1",
   AGENTCORE_SESSION_TIMEOUT_SECONDS: 900,
   AGENTCORE_MAX_SESSIONS: 4,

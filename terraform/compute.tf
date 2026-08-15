@@ -99,9 +99,13 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "OPENAI_BASE_URL", value = "https://api.openai.com/v1" },
       { name = "SCOUT_MODE", value = var.agent_api_base_url != "" ? "remote" : "agentcore" },
       { name = "AGENT_API_BASE_URL", value = var.agent_api_base_url },
-      { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : "disabled" },
+      # Nothing serves the card or closer APIs yet, so a dev stack runs the mocks to keep the
+      # walkthrough whole. A prod stack still refuses to: it stays disabled until a real rail
+      # is configured, and ALLOW_MOCK_MONEY below is what lets the backend accept the mocks.
+      { name = "ALLOW_MOCK_MONEY", value = var.environment == "prod" ? "false" : "true" },
+      { name = "CARD_MODE", value = var.card_api_base_url != "" ? "remote" : (var.environment == "prod" ? "disabled" : "local") },
       { name = "CARD_API_BASE_URL", value = var.card_api_base_url },
-      { name = "PURCHASE_AGENT_MODE", value = var.purchase_agent_api_base_url != "" ? "remote" : "disabled" },
+      { name = "PURCHASE_AGENT_MODE", value = var.purchase_agent_api_base_url != "" ? "remote" : (var.environment == "prod" ? "disabled" : "local") },
       { name = "PURCHASE_AGENT_API_BASE_URL", value = var.purchase_agent_api_base_url },
       { name = "FUNDING_MODE", value = var.funding_mode },
       { name = "HAPPY_WALLET_ADDRESS", value = var.happy_wallet_address },
