@@ -1,24 +1,29 @@
-import { CATALOGUE, type CatalogueEntry, formatSgd } from "./catalogue.js";
+import { CATALOGUE, type CatalogueEntry, type Category, formatSgd } from "./catalogue.js";
 
 /**
  * Picks the catalogue product that best answers a wishlist item.
  *
- * This stands in for a real search. It exists because the alternative — handing every wishlist item
- * the same three hardcoded listings — produced a shortlist that offered an energy drink for
- * "Cocomo Gentle Facial Cleanser", which is worse than no discovery at all: a plausible-looking
- * shortlist nobody can trust.
+ * This stands in for a live search. Two failures shaped it, both seen on screen:
  *
- * The scoring is deliberately dull. Overlapping words between what the user asked for and what a
- * product is, weighted so a hit in the title counts for more than a hit in a shop's category. No
- * embeddings, no model call: a demo needs a shortlist that is obviously sensible, and a dull
- * scorer that can be read in ten seconds is easier to trust than one that cannot.
+ *   1. A stub that cycled three hardcoded listings offered an energy drink for "Cocomo Gentle
+ *      Facial Cleanser". The pick had nothing to do with the request.
+ *   2. Plain word overlap then offered Samsung "Tangle-free" earphones for an "oil-free"
+ *      moisturiser, because both contain "free". Shared words are not shared meaning.
+ *
+ * So matching is category-first. A cleanser and a moisturiser are both skincare; earphones are
+ * not, and no amount of incidental word overlap should bridge that. Within the right category,
+ * word overlap decides which one.
  */
 
-/** Words too common to carry meaning. Matching on "the" or "for" produces noise, not relevance. */
+/** Words too common, or too generic in product copy, to carry meaning. */
 const STOPWORDS = new Set([
   "a", "an", "and", "the", "for", "with", "of", "to", "in", "on", "or", "by", "from",
   "my", "your", "some", "any", "new", "best", "good", "set", "pack", "pcs", "size",
-  "small", "medium", "large", "one", "two", "x", "ml", "g", "kg", "cm", "mm",
+  "small", "medium", "large", "one", "two", "three", "x", "ml", "kg", "cm", "mm",
+  // Marketing filler that appears on everything and matches everything.
+  "free", "daily", "gentle", "soft", "light", "lightweight", "premium", "quality",
+  "pro", "plus", "max", "mini", "official", "original", "sale", "clearance", "step",
+  "broad", "spectrum", "type", "style", "use", "used", "value", "essential",
 ]);
 
 const tokenize = (text: string): string[] =>
@@ -31,35 +36,91 @@ const tokenize = (text: string): string[] =>
 /** Singular/plural collapsed, so "balls" matches "ball" and "earphones" matches "earphone". */
 const stem = (w: string) => (w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w);
 
+/**
+ * What kind of thing a request is for.
+ *
+ * Deliberately keyword-driven and readable. A model call here would be more flexible and far
+ * harder to trust at a glance, and a shortlist has to be obviously sensible.
+ */
+const CATEGORY_HINTS: Record<Category, string[]> = {
+  skincare: [
+    "skincare", "skin", "face", "facial", "cleanser", "cleansing", "wash", "moisturizer",
+    "moisturiser", "serum", "toner", "sunscreen", "spf", "acne", "pimple", "blemish",
+    "exfoliant", "exfoliate", "salicylic", "niacinamide", "retinol", "hyaluronic", "pore",
+    "blackhead", "mask", "essence", "lotion", "cream", "spot", "treatment", "routine",
+  ],
+  beauty: ["makeup", "lipstick", "cosmetic", "foundation", "concealer", "brush", "mascara", "beauty"],
+  pet: ["pet", "dog", "puppy", "cat", "kitten", "chew", "leash", "collar", "litter", "kibble", "treat", "fetch"],
+  music: ["guitar", "bass", "ukulele", "piano", "keyboard", "drum", "string", "capo", "pick", "amp", "instrument", "music", "musician"],
+  electronics: [
+    "phone", "charger", "charging", "cable", "usb", "adapter", "earphone", "headphone",
+    "earbud", "audio", "screen", "protector", "case", "powerbank", "battery", "electronic", "device",
+  ],
+  home: ["home", "kitchen", "cleaning", "cleaner", "detergent", "laundry", "floor", "bathroom", "household", "lock", "storage", "dish"],
+  // "management", "tidy" and "strap" live here rather than under electronics: a cable-tidy request
+  // shares the word "cable" with a charging cable, and without them the tie broke by iteration
+  // order and answered "cable management straps for my desk" with a phone charger.
+  desk: [
+    "desk", "chair", "monitor", "mousepad", "gaming", "office", "workspace", "ergonomic",
+    "management", "tidy", "strap", "anchor", "riser", "mat", "clamp",
+  ],
+  other: [],
+};
+
+/**
+ * Hints are single words on purpose. Tokenisation splits on non-letters, so a two-word hint could
+ * never match anything — "cable management" sat in this table for a while matching nothing at all.
+ */
+export function inferCategory(text: string): Category | null {
+  const words = new Set(tokenize(text).map(stem));
+  let best: { category: Category; hits: number } | null = null;
+
+  for (const [category, hints] of Object.entries(CATEGORY_HINTS) as [Category, string[]][]) {
+    let hits = 0;
+    for (const hint of hints) if (words.has(stem(hint))) hits++;
+    if (hits > 0 && (!best || hits > best.hits)) best = { category, hits };
+  }
+  return best?.category ?? null;
+}
+
 export type Match = {
   entry: CatalogueEntry;
   score: number;
   /** The words that earned the score, for an honest "why". */
   matched: string[];
+  sameCategory: boolean;
 };
 
 export function scoreEntry(itemText: string, entry: CatalogueEntry): Match {
   const wanted = new Set(tokenize(itemText).map(stem));
   const titleWords = new Set(tokenize(entry.title).map(stem));
-  const tagWords = new Set(entry.tags.map((t) => stem(t.toLowerCase())));
+  const keyWords = new Set(entry.keywords.map((k) => stem(k.toLowerCase())));
 
   let score = 0;
   const matched: string[] = [];
   for (const w of wanted) {
-    // A word in the product's own title is strong evidence; a word describing its shop is weak.
+    // A word in the product's own title is strong evidence; one in its curated keywords is decent.
     if (titleWords.has(w)) {
       score += 3;
       matched.push(w);
-    } else if (tagWords.has(w)) {
-      score += 1;
+    } else if (keyWords.has(w)) {
+      score += 2;
       matched.push(w);
     }
   }
-  return { entry, score, matched };
+
+  const wantedCategory = inferCategory(itemText);
+  const sameCategory = wantedCategory !== null && wantedCategory === entry.category;
+  // Category dominates. A skincare request must not be answered with earphones however many
+  // incidental words they share — "oil-free" and "tangle-free" is not a match.
+  if (sameCategory) score += 10;
+  else if (wantedCategory !== null && entry.category !== "other") score -= 8;
+
+  return { entry, score, matched, sameCategory };
 }
 
 /**
- * Ranks the whole catalogue against one wishlist item.
+ * Ranks the catalogue against one wishlist item.
  *
  * Ties break toward the cheaper product: on a card capped at S$30, headroom is worth more than a
  * marginally better word match, and a cheaper item leaves more room for shipping.
@@ -88,30 +149,41 @@ const toListing = (m: Match): MatchedListing => ({
   amountMinor: m.entry.amountMinor,
   why: m.matched.length
     ? `Matched on ${[...new Set(m.matched)].slice(0, 4).join(", ")}`
-    : "Closest available item within the card's S$5-30 range",
+    : m.sameCategory
+      ? `Closest ${m.entry.category} item within the card's S$5-30 range`
+      : "No close match in the catalogue — nearest available item",
   url: m.entry.url,
 });
 
 /**
  * The pick for an item, plus alternates for the "reject and re-search" path.
  *
- * `used` lets a multi-item wishlist avoid proposing the same product twice, which reads as broken
- * even when each pick is individually defensible.
+ * `used` stops a multi-item wishlist proposing the same product twice, which reads as broken even
+ * when each pick is individually defensible. It is a preference, not a rule: exhausting the right
+ * category and then reaching into an unrelated one to stay unique is how a skincare list ends up
+ * holding a guitar cloth, so a repeat within the category beats a fresh irrelevance.
  */
 export function matchListing(
   itemText: string,
   used: Set<string> = new Set(),
 ): { listing: MatchedListing; alternates: MatchedListing[] } {
   const ranked = rankCatalogue(itemText);
-  const fresh = ranked.filter((m) => !used.has(m.entry.url));
-  const pool = fresh.length > 0 ? fresh : ranked;
+  if (ranked.length === 0) throw new Error("catalogue is empty");
 
-  const best = pool[0];
+  const unused = ranked.filter((m) => !used.has(m.entry.url));
+  const bestUnused = unused[0];
+  const bestOverall = ranked[0];
+
+  // Prefer an unused product, but not at the cost of leaving the right category.
+  const best =
+    bestUnused && (bestUnused.sameCategory || !bestOverall?.sameCategory)
+      ? bestUnused
+      : (bestOverall ?? bestUnused);
   if (!best) throw new Error("catalogue is empty");
-  used.add(best.entry.url);
 
+  used.add(best.entry.url);
   return {
     listing: toListing(best),
-    alternates: pool.slice(1, 3).map(toListing),
+    alternates: ranked.filter((m) => m.entry.url !== best.entry.url).slice(0, 2).map(toListing),
   };
 }

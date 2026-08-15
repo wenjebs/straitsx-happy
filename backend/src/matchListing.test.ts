@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CATALOGUE } from "./providers/catalogue.js";
-import { matchListing, rankCatalogue } from "./providers/matchListing.js";
+import { inferCategory, matchListing, rankCatalogue } from "./providers/matchListing.js";
 
 describe("catalogue", () => {
   // Outside S$5-30 the card refuses to mint, so a listing there can never be bought.
@@ -81,7 +81,37 @@ describe("matching a wishlist item to a product", () => {
   it("still returns something for a request nothing matches, and says so", () => {
     const { listing } = matchListing("a zeppelin");
     expect(listing.url).toMatch(/^https:/);
-    expect(listing.why).toMatch(/closest available/i);
+    expect(listing.why).toMatch(/no close match|closest/i);
+  });
+
+  /*
+   * The second regression: plain word overlap offered Samsung "Tangle-free" earphones for an
+   * "oil-free" moisturiser, because both contain "free". Shared words are not shared meaning.
+   */
+  it("does not answer skincare with electronics over an incidental shared word", () => {
+    const { listing } = matchListing("Lightweight oil-free moisturizer for the face");
+    expect(listing.url).not.toContain("compasia");
+    expect(listing.title.toLowerCase()).not.toMatch(/earphone|headphone/);
+  });
+
+  it("keeps a whole skincare wishlist inside skincare", () => {
+    const used = new Set<string>();
+    const items = [
+      "Gentle foaming cleanser",
+      "Lightweight oil-free moisturizer",
+      "Salicylic acid acne treatment",
+    ];
+    for (const item of items) {
+      const { listing } = matchListing(item, used);
+      expect(listing.url).not.toMatch(/sweelee|polypet|secretlab/);
+    }
+  });
+
+  it("infers the category a request is about", () => {
+    expect(inferCategory("gentle foaming face cleanser")).toBe("skincare");
+    expect(inferCategory("chew toy for my puppy")).toBe("pet");
+    expect(inferCategory("guitar capo")).toBe("music");
+    expect(inferCategory("usb-c charging cable")).toBe("electronics");
   });
 
   it("offers alternates for the reject-and-re-search path", () => {
