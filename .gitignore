@@ -41,3 +41,6 @@ crash.log
 *-secrets.json
 .vscode/
 .idea/
+
+# Throwaway probe scripts written by recon subagents
+packages/closer/probe/tmp-*

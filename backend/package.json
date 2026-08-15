@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.1110.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1106.0",
     "@aws-sdk/client-dynamodb": "^3",
     "@aws-sdk/lib-dynamodb": "^3",
     "@hono/node-server": "^2",
