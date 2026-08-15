@@ -16,6 +16,14 @@ build/
 *.db-journal
 *.sqlite
 *.sqlite3
+closer-runs/
+
+# a saved browser profile holds live session cookies — treat it like a password
+closer-profile/
+closer-profiles/
+
+# raw issuer responses — may contain card material, never commit
+card-responses/
 
 # research scratch / third-party docs — not ours to republish
 research-raw.json
