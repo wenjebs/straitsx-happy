@@ -31,6 +31,10 @@
   border-bottom: 1px solid var(--border-faint);
 }
 
+.row:last-child {
+  border-bottom: 0;
+}
+
 .rowBody {
   flex: 1;
 }

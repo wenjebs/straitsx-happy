@@ -26,20 +26,11 @@ export function defaultMandate(): Mandate {
     autoApprove: true,
     itemCap: 600,
     actCap: 2500,
-    categoryRules: {
-      Electronics: "allowed",
-      Groceries: "allowed",
-      Apparel: "ask first",
-      Travel: "ask first",
-      Collectibles: "blocked",
-    },
   };
 }
 
 export function defaultSettings(): Settings {
   return {
-    notify: true,
-    sandbox: true,
     region: "Singapore · SGD",
     dataRetention: "90 days",
   };

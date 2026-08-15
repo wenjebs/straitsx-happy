@@ -195,12 +195,7 @@ function AuthenticatedApp({
                 onChange={(changes) => void actions.setMandate(changes)}
               />
             )}
-            {state.screen === "settings" && (
-              <SettingsScreen
-                settings={state.settings}
-                onToggle={(key) => void actions.setSetting(key)}
-              />
-            )}
+            {state.screen === "settings" && <SettingsScreen settings={state.settings} />}
             {state.screen === "profile" && (
               <ProfileScreen profile={state.profile} onSignOut={() => void onLogout()} />
             )}

@@ -142,18 +142,9 @@ class MockBackend {
     autoApprove: true,
     itemCap: 600,
     actCap: 2500,
-    categoryRules: {
-      Electronics: "allowed",
-      Groceries: "allowed",
-      Apparel: "ask first",
-      Travel: "ask first",
-      Collectibles: "blocked",
-    },
   };
 
   private settings: Settings = {
-    notify: true,
-    sandbox: false,
     region: "Singapore · SGD",
     dataRetention: "90 days",
   };
