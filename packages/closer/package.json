@@ -8,6 +8,8 @@
   },
   "scripts": {
     "demo": "tsx --env-file-if-exists=../../.env demo/run.ts",
+    "login": "tsx demo/login.ts",
+    "probe": "tsx demo/probe.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },

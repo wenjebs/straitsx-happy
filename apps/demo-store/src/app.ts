@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 
 type Item = { sku: string; name: string; priceCents: number; injected?: boolean };
 
@@ -97,6 +98,55 @@ app.get("/checkout-decoy", (c) => {
 });
 
 app.post("/newsletter", (c) => c.html(layout(`<h1>Subscribed</h1>`)));
+
+// A shop that demands an account, the way every marketplace does. The agent never signs in here:
+// a human signs in once in a saved browser profile, and the agent inherits the session cookie.
+const sessions = new Set<string>();
+
+app.get("/login", (c) =>
+  c.html(
+    layout(`
+    <h1>Sign in</h1>
+    <form method="post" action="/login">
+      <label>Email <input name="email" autocomplete="username"></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password"></label>
+      <button type="submit">Sign in</button>
+    </form>
+  `),
+  ),
+);
+
+app.post("/login", async (c) => {
+  const form = await c.req.parseBody();
+  if (!String(form.email ?? "").includes("@")) return c.html(layout(`<h1>Sign in failed</h1>`), 401);
+  const sid = randomBytes(8).toString("hex");
+  sessions.add(sid);
+  setCookie(c, "sid", sid, { httpOnly: true, path: "/" });
+  return c.html(layout(`<h1>Signed in</h1><p><a href="/item/usb-c-hub">Continue shopping</a></p>`));
+});
+
+/** The same checkout as /checkout, but it shows no card form without a session. */
+app.get("/checkout-auth", (c) => {
+  const item = ITEMS[c.req.query("sku") ?? ""];
+  if (!item) return c.text("not found", 404);
+  const sid = getCookie(c, "sid");
+  if (!sid || !sessions.has(sid))
+    return c.html(layout(`<h1>Please sign in</h1><p><a href="/login">Sign in</a></p>`), 401);
+  return c.html(
+    layout(`
+    <h1>Checkout — ${item.name}</h1>
+    <p data-total-cents="${item.priceCents}">Total: S$${(item.priceCents / 100).toFixed(2)}</p>
+    <form method="post" action="/checkout">
+      <input type="hidden" name="sku" value="${item.sku}">
+      <label>Card number <input name="cardNumber" autocomplete="cc-number"></label>
+      <label>Expiry <input name="expiry" autocomplete="cc-exp" placeholder="MM/YY"></label>
+      <label>CVC <input name="cvc" autocomplete="cc-csc"></label>
+      <label>Name on card <input name="name" autocomplete="cc-name"></label>
+      <button type="submit">Pay</button>
+    </form>
+  `),
+  );
+});
 
 app.post("/checkout", async (c) => {
   const form = await c.req.parseBody();

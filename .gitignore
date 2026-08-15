@@ -18,6 +18,9 @@ build/
 *.sqlite3
 closer-runs/
 
+# a saved browser profile holds live session cookies — treat it like a password
+closer-profile/
+
 # raw issuer responses — may contain card material, never commit
 card-responses/
 
