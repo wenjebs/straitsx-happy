@@ -1,17 +1,22 @@
 FROM node:22-alpine AS deps
-RUN npm install --global pnpm@11.1.3
+# better-sqlite3 (via @happy/pay) is a native module with no alpine prebuild.
+RUN apk add --no-cache python3 make g++ && npm install --global pnpm@11.1.3
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY backend/package.json backend/package.json
+COPY packages/pay/package.json packages/pay/package.json
+COPY packages/shared/package.json packages/shared/package.json
 RUN pnpm install --filter @happy/backend... --frozen-lockfile
 
 FROM node:22-alpine AS runtime
 RUN npm install --global pnpm@11.1.3
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/backend/node_modules ./backend/node_modules
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+# Every node_modules tree the install produced, workspace links included.
+COPY --from=deps /app ./
+# The backend imports @happy/pay from source, so its workspace packages ship with it.
+COPY packages/pay ./packages/pay
+COPY packages/shared ./packages/shared
 COPY backend ./backend
 WORKDIR /app/backend
 EXPOSE 8787
