@@ -227,7 +227,9 @@ result.
 
 `POST .../clarifications/:itemId` locks one option. When the last ambiguous item
 is resolved, append the assistant message with `card: "locked"` — that is what
-renders the locked-items panel and the "Dispatch agents" button.
+renders the "Items ready for search" panel and the "Dispatch agents" button.
+That panel lists the complete wishlist: the selected option for clarified items,
+and the existing specification and budget for items that were already spec-bound.
 
 Archived activities (`status` `completed` or `cancelled`) need only
 `id`, `title`, `status`, `displayTs`, `totalMinor` and `archiveLines`.

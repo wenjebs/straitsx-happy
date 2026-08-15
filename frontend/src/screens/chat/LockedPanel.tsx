@@ -8,26 +8,30 @@ interface LockedPanelProps {
   actions: HappyActions;
 }
 
-/** Locked items accumulate visibly, then the run is dispatched. */
+/** Every approved wishlist item stays visible before the run is dispatched. */
 export function LockedPanel({ activity, actions }: LockedPanelProps) {
-  const locked = activity.clarifications.flatMap((clarification) => {
-    const item = activity.wishlist.find((w) => w.id === clarification.itemId);
-    const option = clarification.options.find((o) => o.name === clarification.chosen);
-    return item && option ? [{ item, option }] : [];
+  const ready = activity.wishlist.map((item) => {
+    const clarification = activity.clarifications.find((row) => row.itemId === item.id);
+    const option = clarification?.options.find((row) => row.name === clarification.chosen);
+    return {
+      item,
+      detail: option?.name ?? item.spec,
+      range: option?.range || item.budget,
+    };
   });
 
   return (
     <>
       <div className={styles.panel}>
-        <div className={styles.eyebrow}>Locked items</div>
+        <div className={styles.eyebrow}>Items ready for search</div>
         <div className={styles.list}>
-          {locked.map(({ item, option }) => (
+          {ready.map(({ item, detail, range }) => (
             <div className={styles.row} key={item.id}>
               <span className={styles.dot} style={{ background: hue(item.hueIndex) }} />
               <span className={styles.name}>
-                {item.name} · {option.name}
+                {item.name} · {detail}
               </span>
-              <span className={styles.range}>{option.range}</span>
+              <span className={styles.range}>{range}</span>
             </div>
           ))}
         </div>
