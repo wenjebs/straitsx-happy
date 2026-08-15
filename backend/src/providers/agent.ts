@@ -1,6 +1,6 @@
 import type { Activity } from "../domain.js";
 import { HttpError } from "../errors.js";
-import { STUB_LISTINGS } from "./stubListings.js";
+import { matchListing } from "./matchListing.js";
 
 export interface PlannerProvider {
   readonly mode: "local" | "remote" | "openai" | "disabled";
@@ -320,101 +320,46 @@ export class DisabledAgentProvider implements AgentProvider {
   }
 }
 
+/**
+ * Discovery, standing in for a live search.
+ *
+ * Each wishlist item is matched against a catalogue of REAL products on Singapore storefronts —
+ * every URL opened by a browser, every price read off its own product page, every shop confirmed
+ * to serve an AWS datacentre IP and to reach a card form at checkout.pci.shopifyinc.com.
+ *
+ * It replaces a stub that handed every item the same three hardcoded listings, which offered an
+ * energy drink for "Cocomo Gentle Facial Cleanser". A shortlist that looks plausible and is wrong
+ * is worse than no discovery at all.
+ *
+ * Set SCOUT_LISTINGS=demo-store to point discovery at our own storefront instead, which is the
+ * only target that completes a purchase entirely offline.
+ */
 function localShortlist(activity: Activity) {
-  // Stubbed discovery. The fixtures below point at example.com, which has no checkout — fine for
-  // walking the UI, useless the moment a real Closer tries to buy from them. STUB_LISTINGS carries
-  // URLs that resolve to something real, and DEMO_STORE_URL points at our own storefront, which is
-  // the only target that completes a purchase offline.
-  const stubbed = stubbedShortlist(activity);
-  if (stubbed) return stubbed;
+  if (process.env.SCOUT_LISTINGS === "demo-store") return demoStoreShortlist(activity);
+
+  // Shared across the wishlist so two items never get proposed the same product.
+  const used = new Set<string>();
 
   return activity.wishlist.map((item) => {
-    const isCable = item.id === "usb-c-cable" || /cable/i.test(item.name);
-    return {
-      itemId: item.id,
-      reSearched: false,
-      listing: isCable
-        ? {
-            title: "100W Braided USB-C Cable · 2m",
-            seller: "Local Tech Demo",
-            rating: "4.8 · 1,240 reviews",
-            price: "S$18.90",
-            amountMinor: 1890,
-            why: "Meets the 100W and 2m requirements within budget.",
-            url: "https://example.com/products/usb-c-cable",
-          }
-        : {
-            title: "Foldable Aluminium Phone Stand",
-            seller: "Desk Goods Demo",
-            rating: "4.7 · 830 reviews",
-            price: "S$24.90",
-            amountMinor: 2490,
-            why: "Adjustable, foldable, and suitable for desk use.",
-            url: "https://example.com/products/phone-stand",
-          },
-      alternates: [
-        isCable
-          ? {
-              title: "100W USB-C Cable · 1.8m",
-              seller: "Cable House Demo",
-              rating: "4.6 · 510 reviews",
-              price: "S$16.50",
-              amountMinor: 1650,
-              why: "Compliant lower-cost fallback.",
-              url: "https://example.com/products/usb-c-cable-alt",
-            }
-          : {
-              title: "Compact Adjustable Phone Stand",
-              seller: "Home Office Demo",
-              rating: "4.6 · 405 reviews",
-              price: "S$21.00",
-              amountMinor: 2100,
-              why: "Compliant lower-cost fallback.",
-              url: "https://example.com/products/phone-stand-alt",
-            },
-      ],
-    };
+    const text = [item.name, item.spec, item.category].filter(Boolean).join(" ");
+    const { listing, alternates } = matchListing(text, used);
+    return { itemId: item.id, reSearched: false, listing, alternates };
   });
 }
 
 /**
- * Listings the Closer can actually open, chosen by `SCOUT_LISTINGS`.
+ * apps/demo-store, for a run that completes with no network and no money.
  *
- *   demo-store — our own storefront. The only target that completes a purchase offline, because
- *                AgentCore's browser runs in AWS and cannot reach localhost, so this pairs with
- *                CLOSER_BROWSER=local.
- *   stub       — the real Shopee and Lazada listings in stubListings.ts. Lazada throws a slider
- *                captcha a human clears in the live view; Shopee hard-bounces. Both are the
- *                measured truth rather than a happy path.
- *
- * Unset falls through to the example.com fixtures, which are fine for walking the UI and useless
- * for buying anything.
+ * Prices mirror its own catalogue deliberately. If they drift the Closer's total check refuses the
+ * purchase, which is the check working rather than a bug.
  */
-function stubbedShortlist(activity: Activity) {
-  const mode = process.env.SCOUT_LISTINGS;
-  if (mode !== "demo-store" && mode !== "stub") return null;
-
-  const pool =
-    mode === "demo-store"
-      ? demoStoreListings()
-      : STUB_LISTINGS.map((l) => ({ ...l, rating: `${l.rating} · demo` }));
-
-  return activity.wishlist.map((item, i) => {
-    const listing = pool[i % pool.length];
-    if (!listing) throw new Error("no stub listings configured");
-    return { itemId: item.id, reSearched: false, listing, alternates: [] };
-  });
-}
-
-function demoStoreListings() {
+function demoStoreShortlist(activity: Activity) {
   const base = (process.env.DEMO_STORE_URL ?? "http://127.0.0.1:4030").replace(/\/$/, "");
-  // Prices mirror apps/demo-store's own catalogue. They must match, or the Closer's total check
-  // refuses the purchase — which is the check doing its job.
-  return [
+  const pool = [
     {
       title: "Anker USB-C Hub",
       seller: "demo-store",
-      rating: "4.7 · demo",
+      rating: "verified listing",
       price: "S$18.00",
       amountMinor: 1800,
       why: "Matches the specification within budget.",
@@ -423,13 +368,18 @@ function demoStoreListings() {
     {
       title: "1TB NVMe SSD",
       seller: "demo-store",
-      rating: "4.8 · demo",
+      rating: "verified listing",
       price: "S$29.00",
       amountMinor: 2900,
       why: "Highest capacity still inside the card's S$30 ceiling.",
       url: `${base}/item/nvme-ssd`,
     },
   ];
+  return activity.wishlist.map((item, i) => {
+    const listing = pool[i % pool.length];
+    if (!listing) throw new Error("demo-store pool is empty");
+    return { itemId: item.id, reSearched: false, listing, alternates: [] };
+  });
 }
 
 function delay(ms: number): Promise<void> {
