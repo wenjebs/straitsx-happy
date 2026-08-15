@@ -37,7 +37,10 @@ argues from it and does not repeat its reasoning.
 - `pnpm format` reformats unrelated files. If you run it, revert what is not yours before staging.
 - Style: Biome, 2-space indent, 100-column lines, double quotes. Relative imports carry the `.js`
   extension. Type-only imports use `import type` (`useImportType` is an error).
-- `pnpm test` from the repo root must stay green — 100 tests today, plus this package's.
+- `pnpm test` from the repo root must stay green — 103 passing today (pay 90 + 1 skipped, shared 9,
+  demo-store 4), plus this package's.
+- `@happy/pay` gained `payWithCard(page, id, opts)` in 585a171: `opts.confirm` supplies a merchant's
+  order-confirmation strategy, `opts.submitSelector` overrides submit discovery. Adapters carry both.
 
 ---
 
@@ -210,6 +213,13 @@ export type MandateView = {
 
 export type CheckoutResult = { ok: boolean; orderRef?: string; error?: string };
 
+/** @happy/pay's CheckoutOptions, as of 585a171. `confirm` is consulted only when the library's own
+ *  [data-order-ref] check finds nothing, and may confirm an order but never invent one. */
+export type CheckoutOptions = {
+  confirm?: (page: Page) => Promise<string | null>;
+  submitSelector?: string;
+};
+
 export interface PayApi {
   getMandate(): Promise<MandateView | null>;
   evaluate(q: Quote): Promise<Decision>;
@@ -218,7 +228,7 @@ export interface PayApi {
     purchaseId: string,
     finalTotalCents: number,
   ): Promise<{ last4: string | null; expiresAt: string | null; settlementTx: string | null }>;
-  payWithCard(page: Page, purchaseId: string): Promise<CheckoutResult>;
+  payWithCard(page: Page, purchaseId: string, opts?: CheckoutOptions): Promise<CheckoutResult>;
   complete(purchaseId: string, orderRef: string | null): Promise<void>;
   cancel(purchaseId: string, reason: string): Promise<void>;
   getPurchase(purchaseId: string): Promise<{ state: string } | null>;
@@ -249,9 +259,13 @@ export interface MerchantAdapter {
   toPaymentPage(page: Page, ctx: AdapterContext): Promise<void>;
   /** The all-in total in cents, read from structured markup — never from merchant prose. */
   readFinalTotalCents(page: Page): Promise<number>;
-  /** Called ONLY when payWithCard returned {ok:false,error:"TIMEOUT"}: did the order actually land?
-   *  Must return a real order reference or null. "Probably fine" is not an option — spec §5 Z6. */
-  confirmOutcome?(page: Page): Promise<string | null>;
+  /** Handed to payWithCard as opts.confirm. Must return a real order reference or null; "probably
+   *  fine" is not an option. @happy/pay consults it BEFORE its decline check, so a pattern loose
+   *  enough to match "we could not process your order" marks a purchase DONE that never charged —
+   *  spec §5. */
+  confirmOrder?(page: Page): Promise<string | null>;
+  /** Handed to payWithCard as opts.submitSelector when the library's form-scoped discovery is wrong. */
+  submitSelector?: string;
 }
 
 export type BrowserLike = { newPage(): Promise<Page> };
@@ -536,14 +550,20 @@ git commit -m "Add the closer's crash-safe run journal"
 
 ```ts
 import type { Page } from "playwright";
-import type { BrowserLike, MerchantAdapter, PayApi } from "../src/types.js";
+import type { BrowserLike, CheckoutOptions, MerchantAdapter, PayApi } from "../src/types.js";
 
-export type FakePay = PayApi & { calls: string[]; states: Map<string, string> };
+export type FakePay = PayApi & {
+  calls: string[];
+  states: Map<string, string>;
+  /** What the runner passed as payWithCard's third argument, per call. */
+  checkoutOpts: CheckoutOptions[];
+};
 
 /** A PayApi that records its call order and tracks purchase state the way the real ledger does. */
 export function fakePay(over: Partial<PayApi> = {}): FakePay {
   const calls: string[] = [];
   const states = new Map<string, string>();
+  const checkoutOpts: CheckoutOptions[] = [];
   let n = 0;
   const base: PayApi = {
     async getMandate() {
@@ -571,8 +591,9 @@ export function fakePay(over: Partial<PayApi> = {}): FakePay {
       states.set(id, "CARD_ISSUED");
       return { last4: "4402", expiresAt: null, settlementTx: null };
     },
-    async payWithCard() {
+    async payWithCard(_page, _id, opts) {
       calls.push("payWithCard");
+      checkoutOpts.push(opts ?? {});
       return { ok: true, orderRef: "ord_a1b2" };
     },
     async complete(id) {
@@ -588,7 +609,7 @@ export function fakePay(over: Partial<PayApi> = {}): FakePay {
       return state ? { state } : null;
     },
   };
-  return Object.assign(base, over, { calls, states });
+  return Object.assign(base, over, { calls, states, checkoutOpts });
 }
 
 export function fakePage(url = "http://127.0.0.1:4033/checkout?sku=nvme-ssd") {
@@ -728,7 +749,7 @@ export const realPay: PayApi = {
   evaluate: (q) => pay.evaluate(q),
   reserve: (q) => pay.reserve(q),
   issueCard: (id, cents) => pay.issueCard(id, cents),
-  payWithCard: (page, id) => pay.payWithCard(page, id),
+  payWithCard: (page, id, opts) => pay.payWithCard(page, id, opts ?? {}),
   complete: (id, ref) => pay.complete(id, ref),
   cancel: (id, reason) => pay.cancel(id, reason),
   getPurchase: (id) => pay.getPurchase(id),
@@ -746,6 +767,7 @@ import { createFileJournal, type Journal, type JournalItem, type JournalRecord }
 import { realPay } from "./pay-api.js";
 import type {
   BrowserLike,
+  CheckoutOptions,
   CloserEvent,
   ItemOutcome,
   MerchantAdapter,
@@ -755,6 +777,16 @@ import type {
   Selection,
   ShippingProfile,
 } from "./types.js";
+
+/** The adapter's per-merchant knowledge, handed to @happy/pay. The library owns the safety rule —
+ *  confirm() may confirm an order, never invent one — so it lives in one place, not per adapter. */
+function checkoutOptsFor(a: MerchantAdapter): CheckoutOptions {
+  const confirm = a.confirmOrder?.bind(a);
+  return {
+    ...(confirm ? { confirm } : {}),
+    ...(a.submitSelector ? { submitSelector: a.submitSelector } : {}),
+  };
+}
 
 export type CloserDeps = {
   browser: BrowserLike;
@@ -877,7 +909,7 @@ export function createCloser(deps: CloserDeps) {
       // --- Z5/Z6: no way back. -----------------------------------------------------------------
       deps.onEvent({ type: "exec.step", row: { itemId: sel.itemId, step: 3, state: "live" } });
       log(tag, hue, `${merchantHost}${here.pathname} · placing order ${sgd(total)}`);
-      const res = await pay.payWithCard(page, purchase.id);
+      const res = await pay.payWithCard(page, purchase.id, checkoutOptsFor(adapter));
       const orderRef = res.orderRef ?? null;
       await pay.complete(purchase.id, orderRef);
       item.state = "done";
@@ -1461,7 +1493,8 @@ git commit -m "Recover from a failed issuance by reading the ledger, never the e
 
 **Interfaces:**
 - Consumes: Task 5's runner.
-- Produces: `ItemOutcome.status === "stranded"` and `MerchantAdapter.confirmOutcome` wired in.
+- Produces: `ItemOutcome.status === "stranded"`, and the adapter's `confirmOrder` / `submitSelector`
+  forwarded into `payWithCard`'s options.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1501,42 +1534,28 @@ describe("after the card exists", () => {
     expect(texts).toContain("S$29.00 spent · no order confirmation · card •••• 4402 stranded");
   });
 
-  it("recovers a real order reference through confirmOutcome after a timeout", async () => {
-    const adapter = {
-      ...fakeAdapter(),
-      async confirmOutcome() {
-        return "SG830142";
-      },
-    };
-    const { res, pay } = await runWith({
-      adapter,
-      pay: { async payWithCard() { return { ok: false, error: "TIMEOUT" }; } },
-    });
-    expect(res.items[0]).toMatchObject({ status: "purchased", orderRef: "SG830142" });
-    expect(pay.calls).toContain("complete:pur_1");
+  it("hands the adapter's confirm strategy and submit selector to payWithCard", async () => {
+    // @happy/pay owns when confirm() is consulted (only when its own check finds nothing) and the
+    // rule that it may confirm but never invent. The Closer's job is only to supply the strategy.
+    const confirmOrder = async () => "SG830142";
+    const adapter = { ...fakeAdapter(), confirmOrder, submitSelector: "#pay" };
+    const { pay } = await runWith({ adapter });
+    expect(pay.checkoutOpts[0]?.submitSelector).toBe("#pay");
+    expect(await pay.checkoutOpts[0]?.confirm?.({} as never)).toBe("SG830142");
   });
 
-  it("strands when confirmOutcome cannot confirm — unknown is never success", async () => {
-    const adapter = { ...fakeAdapter(), async confirmOutcome() { return null; } };
+  it("passes no options for an adapter that needs none", async () => {
+    const { pay } = await runWith({});
+    expect(pay.checkoutOpts[0]).toEqual({});
+  });
+
+  it("strands on a timeout, because nothing could confirm the order", async () => {
     const { res, pay } = await runWith({
-      adapter,
       pay: { async payWithCard() { return { ok: false, error: "TIMEOUT" }; } },
     });
     expect(res.items[0]).toMatchObject({ status: "stranded", reason: "TIMEOUT" });
     expect(pay.calls).not.toContain("complete:pur_1");
-  });
-
-  it("does not consult confirmOutcome on a decline — only a timeout is ambiguous", async () => {
-    let asked = 0;
-    const adapter = {
-      ...fakeAdapter(),
-      async confirmOutcome() {
-        asked += 1;
-        return "SG1";
-      },
-    };
-    await runWith({ adapter, pay: { async payWithCard() { return { ok: false, error: "DECLINED" }; } } });
-    expect(asked).toBe(0);
+    expect(pay.states.get("pur_1")).toBe("STRANDED");
   });
 
   it("strands rather than crashing when payWithCard throws", async () => {
@@ -1586,16 +1605,16 @@ Expected: FAIL — the runner completes unconditionally.
 
       let res: { ok: boolean; orderRef?: string; error?: string };
       try {
-        res = await pay.payWithCard(page, purchase.id);
+        // The adapter supplies the merchant's confirmation strategy; @happy/pay decides when to
+        // consult it and enforces that it can confirm an order but never invent one.
+        res = await pay.payWithCard(page, purchase.id, checkoutOptsFor(adapter));
       } catch {
         res = { ok: false, error: "CHECKOUT_THREW" };
       }
 
-      let orderRef = res.ok ? (res.orderRef ?? null) : null;
-      // An unknown outcome is a failure (invariant 8). confirmOutcome is a second observation of
-      // the same page, not a shrug: it must produce a real reference or null.
-      if (!orderRef && res.error === "TIMEOUT" && adapter.confirmOutcome)
-        orderRef = await adapter.confirmOutcome(page).catch(() => null);
+      // An unknown outcome is a failure (invariant 8), and `ok` is the whole answer: the library
+      // has already consulted the adapter's confirm() and refused to invent a reference.
+      const orderRef = res.ok ? (res.orderRef ?? null) : null;
 
       if (orderRef) {
         let completeFailed = false;
@@ -1904,6 +1923,17 @@ describe("demo-store adapter", () => {
     await expect(demoStoreAdapter.readFinalTotalCents(page)).rejects.toThrow();
     await page.close();
   }, 30_000);
+
+  it("reaches the payment form on a page with a decoy form above it", async () => {
+    // /checkout-decoy puts a newsletter signup above the payment form. @happy/pay scopes the
+    // submit to the form holding the card number (585a171); the adapter's job is only to wait for
+    // the right field to appear and read the right total.
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${PORT}/checkout-decoy?sku=nvme-ssd`);
+    await demoStoreAdapter.toPaymentPage(page, ctx);
+    expect(await demoStoreAdapter.readFinalTotalCents(page)).toBe(2900);
+    await page.close();
+  }, 30_000);
 });
 ```
 
@@ -1956,14 +1986,15 @@ export const demoStoreAdapter: MerchantAdapter = {
     return cents;
   },
 
-  // No confirmOutcome: the store emits [data-order-ref], which is exactly what payWithCard reads.
+  // No confirmOrder and no submitSelector: the store emits [data-order-ref], which payWithCard's
+  // built-in check reads, and the library already scopes submission to the card form.
 };
 ```
 
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm --filter @happy/closer test`
-Expected: PASS — 4 new tests, all previous green.
+Expected: PASS — 5 new tests, all previous green.
 
 - [ ] **Step 5: Commit**
 
@@ -2083,6 +2114,18 @@ describe("end to end, offline", () => {
     expect(feed.some((p) => (p?.quotedCents ?? 0) > 3000)).toBe(false);
   }, 120_000);
 
+  it("pays the payment form, not the newsletter sitting above it", async () => {
+    const { closer } = harness();
+    const res = await closer.run({
+      activityId: "act_decoy",
+      idempotencyKey: "k1",
+      selections: [{ itemId: "ssd", url: `${base}/checkout-decoy?sku=nvme-ssd` }],
+    });
+    // Subscribing instead of paying would land on /newsletter with no order reference at all.
+    expect(res.items[0]).toMatchObject({ status: "purchased", amountMinor: 2900 });
+    expect(res.items[0]?.orderRef).toMatch(/^ord_/);
+  }, 120_000);
+
   it("never leaks card material through the run result", async () => {
     const { closer } = harness();
     const res = await closer.run({
@@ -2110,7 +2153,7 @@ If the first assertion fails on `spentCents`, check that the mandate's `merchant
 - [ ] **Step 3: Run the whole repo's tests**
 
 Run: `pnpm test` from the repo root.
-Expected: the existing 100 tests plus this package's, all green.
+Expected: the existing 103 tests plus this package's, all green.
 
 - [ ] **Step 4: Commit**
 
@@ -2194,6 +2237,22 @@ describe("generic adapter", () => {
     await expect(genericAdapter.toPaymentPage(page, ctx)).rejects.toThrow(/no card form/i);
     await page.close();
   }, 30_000);
+
+  it("confirms a real order page", async () => {
+    const page = await browser.newPage();
+    await page.setContent("<h1>Order confirmed</h1><p>Order reference SG830142</p>");
+    expect(await genericAdapter.confirmOrder?.(page)).toBe("SG830142");
+    await page.close();
+  }, 30_000);
+
+  it("refuses to confirm a decline page that happens to say 'order'", async () => {
+    // @happy/pay consults confirm() before its own decline check, so a loose pattern here would
+    // mark a purchase DONE that never charged. This is the highest-consequence adapter test.
+    const page = await browser.newPage();
+    await page.setContent("<h1>Payment declined</h1><p>We could not process your order SG830142</p>");
+    expect(await genericAdapter.confirmOrder?.(page)).toBeNull();
+    await page.close();
+  }, 30_000);
 });
 ```
 
@@ -2265,11 +2324,16 @@ export const genericAdapter: MerchantAdapter = {
     return dollars * 100 + Number(match[2] ?? 0);
   },
 
-  async confirmOutcome(page) {
-    const body = await page.content();
-    if (!/order (confirmed|placed)|thank you for your order/i.test(body)) return null;
-    const ref = body.match(/(?:order|reference)\D{0,12}([A-Z0-9][A-Z0-9-]{4,})/i);
-    return ref?.[1] ?? null;
+  // Handed to payWithCard as opts.confirm. @happy/pay consults it BEFORE its decline check, so
+  // this must demand positive evidence: a decline page says "we could not process your order".
+  async confirmOrder(page) {
+    // Rendered text, not page.content(): markup carries uppercase tokens like UTF-8 that look
+    // exactly like order numbers.
+    const text = await page.locator("body").innerText().catch(() => "");
+    if (!/order (confirmed|placed)|thank you for your order/i.test(text)) return null;
+    if (/declin|could not|unable to|failed/i.test(text)) return null;
+    // An order number is an uppercase token with a digit in it. "CONFIRMED" is not one.
+    return text.match(/\b[A-Z][A-Z0-9-]{4,}\b/g)?.find((t) => /\d/.test(t)) ?? null;
   },
 };
 ```

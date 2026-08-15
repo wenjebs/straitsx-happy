@@ -123,6 +123,25 @@ specified in §11 as an optional export, below the cut line.
 
 *Cost if wrong:* the API author writes twenty lines of mapping instead of zero.
 
+### D8 — The Closer owns navigation; it takes a browser, not a page
+
+The alternative — hand the Closer a page that is already at checkout, and let it do money only — is
+tempting, and it is wrong for one reason: **the property that has to hold at issuance spans both
+halves.** The card must be minted for the total shown on the page we are about to submit. If
+navigation lives outside, the caller decides when the page is "ready" and what the total is, and the
+Closer either trusts a number it did not read or re-reads it with knowledge it does not have. The Z3
+re-read, the one-retry rule (a retry *is* a re-navigation), and the per-item page lifecycle all sit
+on the same seam.
+
+It also is not much of a fork. `toPaymentPage` is a no-op when the page is already at checkout, so
+"hand me a page at the payment page" is a degenerate adapter, not a second architecture: pass a
+`browser` whose `newPage()` returns your pre-driven page and an adapter that only reads the total.
+`BrowserLike` is `{ newPage(): Promise<Page> }` precisely so that substitution costs nothing. The
+Closer takes a browser rather than a page because it runs items sequentially and each needs its own.
+
+*Cost if wrong:* if the discovery agent ends up already holding a page at checkout, the caller
+writes a five-line adapter instead of passing a page. No structural change.
+
 ---
 
 ## 3. Interface
@@ -221,9 +240,13 @@ export interface MerchantAdapter {
   toPaymentPage(page: Page, ctx: AdapterContext): Promise<void>;
   /** The all-in total in cents, read from structured markup — never from merchant prose. */
   readFinalTotalCents(page: Page): Promise<number>;
-  /** Called ONLY after payWithCard returned {ok:false,error:'TIMEOUT'}: did the order actually
-   *  land? Return an order reference, or null for "not confirmed". See §11.1. */
-  confirmOutcome?(page: Page): Promise<string | null>;
+  /** Handed to payWithCard as `opts.confirm`. @happy/pay consults it only when its own
+   *  [data-order-ref] check finds nothing, and it may only CONFIRM an order: return the real
+   *  reference, or null. Read the safety note in §5 before writing one. */
+  confirmOrder?(page: Page): Promise<string | null>;
+  /** Handed to payWithCard as `opts.submitSelector`, for a checkout whose markup defeats the
+   *  library's form-scoped submit discovery. */
+  submitSelector?: string;
 }
 
 export type AdapterContext = {
@@ -249,7 +272,7 @@ so does the rail: the shared rate limit is roughly a dozen POSTs for the whole v
 | Z2 | band filter → `evaluate` → `reserve` | `RESERVED` | none (budget held, no spend) |
 | Z3 | re-read the total off the settled page; guard band + 2% tolerance | `RESERVED` | none |
 | Z4 | `issueCard(id, finalTotal)`; `exec.step 2 live` | `PAYING` → `CARD_ISSUED` | **irreversible** |
-| Z5 | `payWithCard(page, id)` fills, submits, waits; `exec.step 3 live` | `CARD_ISSUED` | spent |
+| Z5 | `payWithCard(page, id, adapterOpts)` fills, submits, waits; `exec.step 3 live` | `CARD_ISSUED` | spent |
 | Z6 | `complete` on a real order ref, else `cancel` → `STRANDED`; `exec.step 4 purchased` | `DONE` / `STRANDED` | settled |
 
 Two properties this ordering exists to guarantee, both straight out of `CLAUDE.md`:
@@ -365,10 +388,15 @@ same idempotency key; already-purchased items are returned from the journal and 
 
 The card exists. There is no way back. Every branch below either gets the goods or records the loss.
 
+The Closer calls `payWithCard(page, id, { confirm: adapter.confirmOrder, submitSelector })`. Since
+585a171 the confirmation strategy lives inside `@happy/pay`: it is consulted only when the library's
+own `[data-order-ref]` check finds nothing, and it can confirm an order but never invent one. The
+runner therefore has no post-`TIMEOUT` recovery branch of its own — `ok` is the whole answer.
+
 | `payWithCard` result | Action | Item status |
 |---|---|---|
-| `{ok:true, orderRef}` | `complete(id, orderRef)` | `purchased` |
-| `{ok:false, error:'TIMEOUT'}` | `adapter.confirmOutcome(page)` → ref? `complete` : `cancel(id,'no_confirmation')` | `purchased` / `stranded` |
+| `{ok:true, orderRef}` (built-in check, or the adapter's `confirm`) | `complete(id, orderRef)` | `purchased` |
+| `{ok:false, error:'TIMEOUT'}` — nothing could confirm it | `cancel(id,'timeout')` | `stranded` |
 | `{ok:false, error:'DECLINED'}` | `cancel(id,'declined')` | `stranded` |
 | `{ok:false, error:'FIELDS_NOT_FOUND'}` | `cancel(id,'fields_not_found')` | `stranded` |
 | `{ok:false, error:'CARD_UNREADABLE'}` | `cancel(id,'card_unreadable')` | `stranded` |
@@ -387,9 +415,15 @@ Notes that matter:
   nothing bought stays counted as spent. `cancel` on a `CARD_ISSUED` purchase writes `STRANDED`,
   kills the card, and keeps the amount in `spentCents`. The Closer's job is to make that loud: a
   `SYS` log line naming the amount and the last four, and a non-`purchased` status in the result.
-- **An unknown outcome is never reported as success** (invariant 8). `confirmOutcome` is not a
+- **An unknown outcome is never reported as success** (invariant 8). `confirmOrder` is not a
   loophole: it is a second, adapter-specific *observation* of the same page, and it must return a
   real order reference or null. It may not return "probably fine".
+- **A sloppy `confirmOrder` is the one way an adapter can lose money silently.** `@happy/pay`
+  consults it *before* its decline check, so a regex loose enough to match a decline page — "we
+  could not process your **order**" — marks a purchase `DONE` that never charged, and the item is
+  reported as bought. Every `confirmOrder` must require positive evidence (a confirmation heading
+  **and** a reference-shaped token) and must be tested against a decline page, not only a success
+  page. Task 10 of the plan has that test; the demo-store adapter needs no `confirmOrder` at all.
 - **Cancelling a finished purchase throws** (invariant 7), so `complete` and `cancel` are mutually
   exclusive on every path and never both attempted.
 - The card's ~10 minute TTL is not a reason to abandon anything. If more than 8 minutes have
@@ -444,6 +478,23 @@ settlement outcome unknown · run stopped · reconciler will resolve pur_9f3c
 `LogLine.id` is `l_<activityId>_<seq>` with a monotonic per-run counter; `ts` is local `HH:MM:SS`.
 `hueIndex` comes from the selection, defaulting to its index modulo 6.
 
+### Four steps, one of them irreversible
+
+The contract's four steps are a progress bar (`step/4`), not a model of the money. Only step 2
+moves money; steps 3 and 4 are both after the point of no return. Two consequences worth stating
+before someone reads the bar as a safety indicator:
+
+- **The step number cannot show where the point of no return is**, and it should not try. The
+  alternative mapping — fold issuance into step 3, so 1–2 are reversible and 3–4 are not — was
+  rejected because it hides the money event behind the same step as the submit, and the card-issued
+  moment is exactly the one the contract's own example log line calls out. The bar shows progress;
+  the `card •••• 4402 issued` line shows the money. A judge watching the screen sees both.
+- **An item that never reaches step 4 has no honest resting state.** `ExecutionRow.state` is
+  `queued | live | purchased`, so a skipped or stranded item's last row stays `live` at whatever
+  step it reached, which reads as "still working". The Closer does not paper over this by emitting a
+  `purchased` row it cannot justify: it leaves the row where it is and writes a `SYS` log line
+  saying what happened. The real fix is a `failed` state in the contract (§11.2).
+
 `run.completed` carries `totalMinor` and an ISO `completedAt`; the API turns it into the contract's
 `activity.completed` (whose `completedAt` is a display string — the API formats it) and, after
 rebuilding the wallet, `wallet.updated`.
@@ -493,8 +544,11 @@ Matches `127.0.0.1`, `localhost`, and `$DEMO_STORE_URL`'s host.
   `/checkout`, do nothing. Wait for `input[autocomplete="cc-number"]` to be visible.
 - `readFinalTotalCents`: `parseInt(await page.locator('[data-total-cents]').first().getAttribute('data-total-cents'))`.
   Structured attribute, not prose — see §12.
-- `confirmOutcome`: not needed; the store emits `[data-order-ref]`, which is exactly what
-  `payWithCard` already looks for.
+- `confirmOrder`: not needed; the store emits `[data-order-ref]`, which is exactly what
+  `payWithCard`'s built-in check reads.
+- `submitSelector`: not needed. Since 585a171 the library scopes submission to the form holding the
+  card number, which is what `/checkout-decoy` — a newsletter form sitting above the payment form —
+  exists to prove.
 
 ### 8.2 `genericAdapter` — best effort, allowed to give up
 
@@ -508,8 +562,13 @@ Matches everything (registered last).
 - `readFinalTotalCents`: first `[data-total-cents]`, else the last currency-shaped match in an
   element whose text matches `/total/i`, parsed strictly to integer cents. Ambiguity throws
   `TOTAL_UNREADABLE` — the item is skipped rather than guessed at.
-- `confirmOutcome`: looks for a confirmation heading (`/order (confirmed|placed)|thank you/i`) plus
-  an order-number-shaped token, and returns that token. Returns null otherwise.
+- `confirmOrder`: reads the page's rendered text (not its markup, which carries uppercase tokens
+  like `UTF-8` that look like order numbers), requires a confirmation heading (`/order
+  (confirmed|placed)|thank you for your order/i`), rejects anything containing decline language,
+  and then returns the first uppercase token of five or more characters that contains a digit.
+  Anything less returns null. The heading pattern deliberately excludes bare "order", because a
+  decline page says "we could not process your order" and `@happy/pay` consults `confirm` *before*
+  its own decline check.
 
 ### 8.3 What a real merchant would additionally need
 
@@ -606,22 +665,24 @@ that rather than trusting the total from the aborted run.
 
 ## 11. Where this design pushes back on things it must not change
 
-### 11.1 `@happy/pay` change requests — written down, not made
+### 11.1 `@happy/pay` change requests
 
-The brief forbids modifying `packages/pay`. These are the cases, for the owner to judge:
+The brief forbids modifying `packages/pay`, so these were raised with its owner rather than written.
+The first two were **fixed in 585a171**; the Closer is specified against the new signature.
 
-1. **`payWithCard` detects success only via `[data-order-ref]`** (`checkout.ts:80`). That attribute
-   exists on our demo store and essentially nowhere else. On a real merchant a *successful* order
-   returns `{ok:false, error:'TIMEOUT'}`, and a caller that trusts it strands a purchase that
-   actually went through. **Requested:** an optional caller-supplied confirmation strategy, e.g.
-   `payWithCard(page, id, { orderRef: (page) => Promise<string|null> })`.
-   **Workaround until then:** `adapter.confirmOutcome`, called only on `TIMEOUT` (§5, Z6). It
-   recovers the goods without weakening invariant 8, because it must produce a real reference.
-2. **`payWithCard` clicks the first `button[type="submit"]` on the page** (`checkout.ts:72`). On a
-   real checkout that could be a coupon or newsletter form. **Requested:** an optional submit
-   selector. No workaround exists in the Closer — once `payWithCard` is called, the click is its.
-3. **No 3DS handling.** A challenge page reads as `TIMEOUT` and the card is burned. Not a
-   library defect so much as a rail question (blocker 2), but the failure surfaces here.
+1. ~~**`payWithCard` detects success only via `[data-order-ref]`.**~~ **Resolved.** That attribute
+   exists on our demo store and essentially nowhere else, so at a real merchant a *successful* order
+   returned `{ok:false, error:'TIMEOUT'}` and a caller that cancels on failure stranded money that
+   had actually bought something. `payWithCard(page, id, { confirm })` now takes a merchant strategy,
+   consulted only when the built-in check finds nothing. It may confirm an order but never invent
+   one, so invariant 8 holds and the rule lives in one place instead of in every adapter.
+2. ~~**`payWithCard` clicks the page's first `button[type="submit"]`.**~~ **Resolved.** It now
+   prefers the submit control inside the form holding the card number, with the old behaviour as
+   fallback and a `submitSelector` override. `apps/demo-store`'s `/checkout-decoy` route — a
+   newsletter form above the payment form — exists to prove it pays rather than subscribes.
+3. **No 3DS handling.** A challenge page reads as `TIMEOUT` and the card is burned. Not a library
+   defect so much as a rail question (blocker 2), but the failure surfaces here. **Nothing to fix in
+   code:** the demo script must state that a 3DS challenge burns the card, so nobody meets it live.
 4. `cancel` after issuance always strands. Correct, and no change wanted — noted so nobody reads
    `stranded` as a Closer bug.
 
@@ -635,6 +696,7 @@ The brief forbids modifying `packages/pay`. These are the cases, for the owner t
 | No approval endpoint | `NEEDS_HUMAN` needs `approve(purchaseId)` | Either add `POST /v1/activities/:id/items/:itemId/approve`, or keep `perItemCents === maxCardCents` (D5) |
 | `Wallet.balanceMinor`, `address` | `getWallet()` returns `null` for both in mock mode | API renders a mock placeholder; never invent a number |
 | `Wallet.cards[].pan: "4319 •••• 4402"` | Only `last4` is available, ever | `"•••• •••• •••• 4402"` |
+| `ExecutionRow.state` is `queued \| live \| purchased` | An item can also be *skipped* or *stranded*, and both are normal | Add a `failed` state. Until then a skipped item's row stays `live` at the step it reached, which reads as "still working" — see §6 |
 
 `buildWalletView()` — an optional Closer export that assembles the contract's `Wallet` from
 `getWallet()`, `listPurchases()` and `getMandate()` — is specified here and sits **below the cut
@@ -648,7 +710,7 @@ line**. If the API author wants it, it is thirty lines; if they would rather own
 instruction to buy gift cards for an attacker. The Closer's defence is structural, not textual:
 
 - **Page text is never an instruction.** The Closer parses exactly two things out of a page: an
-  integer from a structured total attribute, and (in the generic adapter's `confirmOutcome`) an
+  integer from a structured total attribute, and (in the generic adapter's `confirmOrder`) an
   order reference. No page content reaches a model prompt, because the Closer has no model in it.
 - **The merchant host comes from `page.url()`**, so a page cannot redirect money to another host
   without an actual navigation, which changes the host we quote against.
@@ -673,7 +735,7 @@ and nothing else, and that no purchase exists for any other host.
 | Injection | hostile page cannot move money off-band or off-host | demo-store `/item/injected` |
 
 Never against the live rail: `ISSUER=mock` everywhere, ports 4033/4034 (4030 is dev, 4032 is pay's
-e2e). `pnpm test` from the root must stay green — 100 tests today, plus the Closer's.
+e2e). `pnpm test` from the root must stay green — 103 passing today, plus the Closer's.
 
 ---
 
