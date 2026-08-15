@@ -26,7 +26,7 @@ const config: Config = {
   NODE_ENV: "test",
   DATA_STORE: "memory",
   AWS_REGION: "ap-southeast-1",
-  FRONTEND_ORIGIN: "http://localhost:4040",
+  FRONTEND_ORIGIN: ["http://localhost:4040"],
   PUBLIC_BASE_URL: "http://localhost:8787",
   AUTH_MODE: "disabled",
   PLANNER_MODE: "remote",

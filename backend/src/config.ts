@@ -25,7 +25,23 @@ const Env = z
     DYNAMODB_TABLE: optionalString,
     DYNAMODB_ENDPOINT: optionalUrl,
     AWS_REGION: z.string().default("ap-southeast-1"),
-    FRONTEND_ORIGIN: z.string().default("http://localhost:4040"),
+    /**
+     * Allowed browser origins, comma-separated.
+     *
+     * A list rather than one value because the single value is a trap: the laptop's LAN address
+     * changes with DHCP, and a demo is watched on `localhost` while a phone on the same network
+     * uses the IP. Either way the frontend has no mock to fall back to, so the wrong origin here
+     * is a blank screen with a CORS error rather than a degraded UI.
+     */
+    FRONTEND_ORIGIN: z
+      .string()
+      .default("http://localhost:4040")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((origin) => origin.trim().replace(/\/$/, ""))
+          .filter(Boolean),
+      ),
     PUBLIC_BASE_URL: z.url().default("http://localhost:8787"),
     AUTH_MODE: z.enum(["disabled", "local", "cognito"]).default("local"),
     AUTH_SESSION_SECRET: optionalSecret,
