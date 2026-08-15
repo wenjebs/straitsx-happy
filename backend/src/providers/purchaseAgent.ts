@@ -1,13 +1,20 @@
 import type { Listing, WishlistItem } from "../domain.js";
 import { HttpError } from "../errors.js";
-import type { IssuedCard } from "./card.js";
+
+export interface CardGrant {
+  claimUrl: string;
+  token: string;
+  amountMinor: number;
+  currency: "SGD";
+  expiresAt: string;
+}
 
 export interface PurchaseAgentRequest {
   activityId: string;
   attemptId: string;
   item: WishlistItem;
   listing: Listing;
-  card: IssuedCard;
+  cardGrant: CardGrant;
   sandbox: boolean;
   idempotencyKey: string;
 }
@@ -27,7 +34,7 @@ export interface RemotePurchaseAgentOptions extends CallbackOptions {
   token?: string;
 }
 
-/** Dispatches a single listing/card capability to the separately-owned Closer agent. */
+/** Dispatches a listing and one-use card grant to the separately-owned Closer agent. */
 export class RemotePurchaseAgentProvider implements PurchaseAgentProvider {
   readonly mode = "remote" as const;
 
@@ -43,13 +50,6 @@ export class RemotePurchaseAgentProvider implements PurchaseAgentProvider {
       body: JSON.stringify({
         ...request,
         amountMinor: request.listing.amountMinor,
-        card: {
-          cardId: request.card.cardId,
-          last4: request.card.last4,
-          revealUrl: request.card.agentAccess.revealUrl,
-          revealToken: request.card.agentAccess.token,
-          expiresAt: request.card.agentAccess.expiresAt,
-        },
         callback: callbackFor(this.options, request.activityId),
       }),
       signal: AbortSignal.timeout(15_000),
@@ -74,7 +74,16 @@ export class LocalPurchaseAgentProvider implements PurchaseAgentProvider {
     if (!request.sandbox) {
       throw new HttpError(409, "Local Closer failsafe only runs in Sandbox mode.");
     }
-    void this.run(request);
+    void this.run(request).catch(async (error) => {
+      await postCallback(callbackFor(this.options, request.activityId), {
+        eventId: crypto.randomUUID(),
+        attemptId: request.attemptId,
+        itemId: request.item.id,
+        type: "purchase.failed",
+        message: error instanceof Error ? error.message : "Local Closer failed.",
+        retryable: true,
+      });
+    });
   }
 
   private async run(request: PurchaseAgentRequest): Promise<void> {
@@ -85,6 +94,8 @@ export class LocalPurchaseAgentProvider implements PurchaseAgentProvider {
       itemId: request.item.id,
     };
 
+    await delay(350);
+    await claimCard(request.cardGrant);
     await delay(650);
     await postCallback(callback, {
       ...common,
@@ -116,6 +127,20 @@ export class LocalPurchaseAgentProvider implements PurchaseAgentProvider {
       message: "sandbox merchant confirmed the order",
     });
   }
+}
+
+async function claimCard(grant: CardGrant): Promise<void> {
+  const response = await fetch(grant.claimUrl, {
+    method: "POST",
+    headers: { authorization: `Bearer ${grant.token}` },
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `Local Closer could not claim its card (${response.status})${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  await response.json();
 }
 
 export class DisabledPurchaseAgentProvider implements PurchaseAgentProvider {

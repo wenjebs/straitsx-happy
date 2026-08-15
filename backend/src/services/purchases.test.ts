@@ -90,11 +90,8 @@ async function eventuallyCompleted(repository: MemoryRepository): Promise<Activi
 }
 
 async function finishPurchase(service: PurchaseService, agents: PurchaseAgents): Promise<void> {
-  for (let attempt = 0; attempt < 50 && agents.requests.length === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  const request = agents.requests[0];
-  if (!request) throw new Error("purchase agent did not receive a job");
+  const request = await waitForJob(agents);
+  await service.claimCard(request.activityId, request.attemptId, request.cardGrant.token);
   await service.handleAgentEvent(request.activityId, {
     type: "browser.started",
     eventId: "event-browser",
@@ -111,12 +108,22 @@ async function finishPurchase(service: PurchaseService, agents: PurchaseAgents):
   });
 }
 
+async function waitForJob(agents: PurchaseAgents): Promise<PurchaseAgentRequest> {
+  for (let attempt = 0; attempt < 50 && agents.requests.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const request = agents.requests[0];
+  if (!request) throw new Error("purchase agent did not receive a job");
+  return request;
+}
+
 describe("PurchaseService", () => {
   it("enforces the card rail before issuing and leaves a denied activity retryable", async () => {
     const repository = new MemoryRepository();
     const cards = new Cards();
     const agents = new PurchaseAgents();
     const service = new PurchaseService(repository, new EventHub(), cards, agents, {
+      PUBLIC_BASE_URL: "http://localhost:8787",
       PAYMENT_MIN_MINOR: 500,
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,
@@ -137,6 +144,12 @@ describe("PurchaseService", () => {
     expensive.totalMinor = 2500;
     await repository.putActivity(expensive);
     await service.start(expensive.id, "idempotency-valid");
+    const job = await waitForJob(agents);
+    expect(cards.issued).toBe(0);
+    await expect(service.claimCard(job.activityId, job.attemptId, "wrong-grant")).rejects.toThrow(
+      "missing or invalid",
+    );
+    expect(cards.issued).toBe(0);
     await finishPurchase(service, agents);
     const completed = await eventuallyCompleted(repository);
     expect(completed.execution[0]).toEqual(
@@ -150,6 +163,7 @@ describe("PurchaseService", () => {
     const cards = new Cards();
     const agents = new PurchaseAgents();
     const service = new PurchaseService(repository, new EventHub(), cards, agents, {
+      PUBLIC_BASE_URL: "http://localhost:8787",
       PAYMENT_MIN_MINOR: 500,
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,

@@ -68,7 +68,7 @@ apps/                    legacy prototypes; not used by the current runtime
 `backend/` implements the complete frontend contract and owns the safety
 decision. It stores production state in DynamoDB, sends jobs to the separately
 owned agent runtime, receives authenticated progress and livestream callbacks,
-issues an exact-value card, and dispatches checkout to a separate Closer agent. See
+grants a separate Closer agent permission to pull one exact-value card, and tracks checkout. See
 [`backend/README.md`](./backend/README.md) for both integration protocols.
 
 `frontend/` can still run with its in-browser mock when `VITE_API_BASE_URL` is

@@ -164,6 +164,19 @@ export function createApp(deps: AppDependencies): Hono {
     return c.json(await deps.purchases.handleAgentEvent(c.req.param("id"), body), 202);
   });
 
+  app.post("/v1/integrations/purchases/:id/attempts/:attemptId/card", async (c) => {
+    const authorization = c.req.header("authorization");
+    if (!authorization?.startsWith("Bearer ")) {
+      throw new HttpError(401, "Card grant token is required.");
+    }
+    const card = await deps.purchases.claimCard(
+      c.req.param("id"),
+      c.req.param("attemptId"),
+      authorization.slice("Bearer ".length),
+    );
+    return c.json(card, 201);
+  });
+
   app.get("/v1/dev/streams/:id", (c) => {
     if (deps.agents.mode !== "local" && deps.purchaseAgents.mode !== "local") {
       throw new HttpError(404, "Local stream failsafe is disabled.");

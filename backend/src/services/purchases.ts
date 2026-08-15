@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config.js";
 import type {
   Activity,
@@ -12,7 +13,7 @@ import type {
 import { displayTime, formatMinor, logTime, newId } from "../domain.js";
 import { asMessage, HttpError } from "../errors.js";
 import type { EventHub } from "../events.js";
-import type { CardProvider } from "../providers/card.js";
+import type { CardProvider, IssuedCard } from "../providers/card.js";
 import type { PurchaseAgentProvider } from "../providers/purchaseAgent.js";
 import type { Repository } from "../repository.js";
 import type { PurchaseAgentCallback } from "../schemas.js";
@@ -25,7 +26,7 @@ export class PurchaseService {
     private readonly purchaseAgents: PurchaseAgentProvider,
     private readonly config: Pick<
       Config,
-      "PAYMENT_MIN_MINOR" | "PAYMENT_MAX_MINOR" | "PAYMENT_ATTEMPTS_PER_LISTING"
+      "PUBLIC_BASE_URL" | "PAYMENT_MIN_MINOR" | "PAYMENT_MAX_MINOR" | "PAYMENT_ATTEMPTS_PER_LISTING"
     >,
   ) {}
 
@@ -161,6 +162,83 @@ export class PurchaseService {
     return activity;
   }
 
+  /** Called by Closer to pull its exact-value card after accepting the job. */
+  async claimCard(activityId: string, attemptId: string, grantToken: string): Promise<IssuedCard> {
+    const [activity, run] = await Promise.all([
+      this.getActivity(activityId),
+      this.repository.getPurchaseRun(activityId),
+    ]);
+    if (run?.status !== "running" || activity.stage !== "exec") {
+      throw new HttpError(409, "This purchase attempt is not running.");
+    }
+    if (run.attemptId !== attemptId) {
+      throw new HttpError(409, "This card grant belongs to a stale purchase attempt.");
+    }
+    if (!run.cardGrantHash || !safeHashEqual(hashGrant(grantToken), run.cardGrantHash)) {
+      throw new HttpError(401, "Card grant token is missing or invalid.");
+    }
+    if (!run.cardGrantExpiresAt || Date.parse(run.cardGrantExpiresAt) <= Date.now()) {
+      throw new HttpError(410, "Card grant has expired.");
+    }
+
+    const pick = activity.shortlist[run.itemIndex];
+    const item = pick && activity.wishlist.find((row) => row.id === pick.itemId);
+    const listing = pick && [pick.listing, ...(pick.alternates ?? [])][run.candidateIndex];
+    if (!item || !listing) throw new HttpError(409, "Purchase cursor is no longer valid.");
+    const [mandate, settings, wallet] = await Promise.all([
+      this.repository.getMandate(activity.userId),
+      this.repository.getSettings(activity.userId),
+      this.repository.getWallet(activity.userId),
+    ]);
+    this.assertListing(item, listing, mandate);
+    if (listing.amountMinor > wallet.balanceMinor) {
+      throw new HttpError(422, "Wallet balance is below the exact card amount.");
+    }
+    if (this.cards.mode === "local" && !settings.sandbox) {
+      throw new HttpError(409, "Local card claims require Sandbox mode.");
+    }
+
+    const attemptKey = `${run.idempotencyKey}:${item.id}:${run.candidateIndex}:${run.attemptIndex}`;
+    const firstClaim = !run.cardClaimedAt;
+    const card = await this.cards.issueCard({
+      activity,
+      item,
+      listing,
+      mandate,
+      settings,
+      idempotencyKey: attemptKey,
+    });
+    if (run.cardId && run.cardId !== card.cardId) {
+      throw new HttpError(502, "Card provider violated idempotency for this attempt.");
+    }
+    run.cardId = card.cardId;
+    run.cardLast4 = card.last4;
+    run.cardClaimedAt ??= new Date().toISOString();
+    run.updatedAt = new Date().toISOString();
+    if (!wallet.cards.some((row) => row.pan.endsWith(card.last4))) {
+      wallet.cards.unshift({
+        pan: `•••• •••• ${card.last4}`,
+        amount: listing.price,
+        status: "issued",
+      });
+    }
+    await Promise.all([
+      this.repository.putWallet(activity.userId, wallet),
+      this.repository.putPurchaseRun(run),
+    ]);
+    if (firstClaim) {
+      this.events.emit(activity.id, { type: "wallet.updated", wallet });
+      await this.emitStep(
+        activity,
+        item,
+        1,
+        "live",
+        `Closer claimed exact-value card •••• ${card.last4} · limit ${listing.price}`,
+      );
+    }
+    return card;
+  }
+
   private async startNextAttempt(activityId: string): Promise<void> {
     const [activity, run] = await Promise.all([
       this.getActivity(activityId),
@@ -207,43 +285,26 @@ export class PurchaseService {
 
       const attemptId = newId("attempt");
       const attemptKey = `${run.idempotencyKey}:${item.id}:${run.candidateIndex}:${run.attemptIndex}`;
+      const grantToken = `card-grant-${crypto.randomUUID()}`;
+      const grantExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
       try {
-        const card = await this.cards.issueCard({
-          activity,
-          item,
-          listing,
-          mandate,
-          settings,
-          idempotencyKey: attemptKey,
-        });
         run.attemptId = attemptId;
-        run.cardId = card.cardId;
-        run.cardLast4 = card.last4;
+        run.cardGrantHash = hashGrant(grantToken);
+        run.cardGrantExpiresAt = grantExpiresAt;
         run.updatedAt = new Date().toISOString();
-        const wallet = await this.repository.getWallet(activity.userId);
-        wallet.cards.unshift({
-          pan: `•••• •••• ${card.last4}`,
-          amount: listing.price,
-          status: "issued",
-        });
-        await Promise.all([
-          this.repository.putWallet(activity.userId, wallet),
-          this.repository.putPurchaseRun(run),
-        ]);
-        this.events.emit(activity.id, { type: "wallet.updated", wallet });
-        await this.emitStep(
-          activity,
-          item,
-          1,
-          "live",
-          `exact-value card •••• ${card.last4} issued · limit ${listing.price}`,
-        );
+        await this.repository.putPurchaseRun(run);
         await this.purchaseAgents.startPurchase({
           activityId,
           attemptId,
           item,
           listing,
-          card,
+          cardGrant: {
+            claimUrl: `${this.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/v1/integrations/purchases/${encodeURIComponent(activityId)}/attempts/${encodeURIComponent(attemptId)}/card`,
+            token: grantToken,
+            amountMinor: listing.amountMinor,
+            currency: "SGD",
+            expiresAt: grantExpiresAt,
+          },
           sandbox: settings.sandbox,
           idempotencyKey: attemptKey,
         });
@@ -274,6 +335,9 @@ export class PurchaseService {
     if (!pick) throw new Error("Confirmed item is outside the shortlist.");
     const listing = [pick.listing, ...(pick.alternates ?? [])][run.candidateIndex];
     if (!listing) throw new Error("Confirmed listing is outside the candidate list.");
+    if (!run.cardId || !run.cardLast4 || !run.cardClaimedAt) {
+      throw new HttpError(409, "Closer cannot confirm an order before claiming its card.");
+    }
     const wallet = await this.repository.getWallet(activity.userId);
     const walletCard = wallet.cards.find(
       (row) => row.pan.endsWith(run.cardLast4 ?? "") && row.status === "issued",
@@ -405,6 +469,9 @@ export class PurchaseService {
 
   private clearAttempt(run: PurchaseRun): void {
     delete run.attemptId;
+    delete run.cardGrantHash;
+    delete run.cardGrantExpiresAt;
+    delete run.cardClaimedAt;
     delete run.cardId;
     delete run.cardLast4;
     run.updatedAt = new Date().toISOString();
@@ -493,4 +560,14 @@ export class PurchaseService {
       activity: structuredClone(activity),
     });
   }
+}
+
+function hashGrant(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function safeHashEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
 }

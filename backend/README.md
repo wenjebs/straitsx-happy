@@ -4,13 +4,13 @@ The Hono HTTP/SSE backend for `frontend/`. It owns the mandate and wallet, store
 in DynamoDB in production, and orchestrates three deliberately separate integrations:
 
 1. **Scout agent** — plans the wishlist, searches listings, and supplies search livestreams.
-2. **StraitsX card provider** — issues an exact-value, single-use card capability.
-3. **Closer purchase agent** — opens one approved listing, obtains the card through that
-   short-lived capability, checks out, and reports milestones plus its livestream.
+2. **StraitsX card provider** — issues an exact-value card only when Closer claims its grant.
+3. **Closer purchase agent** — receives one approved listing and a short-lived grant, actively
+   claims the card, checks out, and reports milestones plus its livestream.
 
-The backend never persists a PAN or card capability token. Purchases are sequential, callback
-events are deduplicated, stale attempt callbacks are rejected, and a retry gets a newly issued
-card. Wallet funds move only after `order.confirmed`.
+The backend never persists a PAN, raw card grant, or card capability token. Purchases are
+sequential, callback events are deduplicated, stale attempt callbacks are rejected, and a retry
+gets a new grant. Wallet funds move only after `order.confirmed`.
 
 ## Run locally
 
@@ -66,17 +66,22 @@ The callback is `POST /v1/integrations/agents/:activityId/events`. Accepted even
 
 | Path | Request purpose | Required response |
 |---|---|---|
-| `POST /v1/cards` | Issue the exact listing amount after mandate checks. | `{ cardId, last4, agentAccess: { revealUrl, token, expiresAt? } }` |
+| `POST /v1/cards` | Issue the exact listing amount when Closer claims an approved grant. | `{ cardId, last4, agentAccess: { revealUrl, token, expiresAt? } }` |
 | `POST /v1/wallet/topups` | Confirm an XSGD wallet top-up. | `{ transactionId, confirmations }` |
 
-`agentAccess` must be short-lived and single-use. Happy passes it directly to Closer and does not
-store the token.
+`agentAccess` must be short-lived and single-use. Happy returns it only in the response to
+Closer's card-claim request and does not store the token.
 
 ## Closer API Happy calls
 
 Happy sends `POST /v1/purchase-runs` with `activityId`, `attemptId`, the exact selected listing,
-the item, sandbox flag, idempotency key, card metadata/capability, and a callback `{ url, token }`.
-An accepted response only means the asynchronous job was queued.
+the item, sandbox flag, idempotency key, a `cardGrant`, and a callback `{ url, token }`. An
+accepted response only means the asynchronous job was queued. No card has been issued yet.
+
+Closer takes the card itself by calling `POST cardGrant.claimUrl` with
+`Authorization: Bearer <cardGrant.token>`. The grant is bound to the attempt, item, listing amount,
+mandate, and expiry. Happy then calls StraitsX and returns `{ cardId, last4, agentAccess }` directly
+to Closer. The raw grant is never stored; only its SHA-256 hash is durable.
 
 Closer posts one event at a time to
 `POST /v1/integrations/purchases/:activityId/events`:

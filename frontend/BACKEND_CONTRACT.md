@@ -372,6 +372,8 @@ What the backend must do:
   anything, and reject with a readable message if it fails.
 - Issue cards at exactly the approved amount, so an agent cannot overspend a card
   it holds.
+- Give Closer a short-lived, attempt-bound grant and issue the card only when
+  Closer actively claims it. Do not create or push the card while queuing the job.
 - Drive execution strictly sequentially: four steps per item, one item at a time,
   emitting `exec.step` and `log.line` as each actually happens.
 - Treat the browser purchase as asynchronous: accept Closer callbacks, reject stale
@@ -382,7 +384,7 @@ What the backend must do:
 Suggested log line forms, which the UI renders verbatim:
 
 ```
-card 4319 4400 issued · limit S$429.00
+Closer claimed card 4400 · limit S$429.00
 bizgram-asia/checkout · autofill ok
 placing order S$429.00
 order #SG830142 confirmed · card expired

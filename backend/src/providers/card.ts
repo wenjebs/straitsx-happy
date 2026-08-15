@@ -109,6 +109,7 @@ export class RemoteCardProvider implements CardProvider {
 /** Explicitly fake card rail for the local website walkthrough. */
 export class LocalCardProvider implements CardProvider {
   readonly mode = "local" as const;
+  private readonly issued = new Map<string, IssuedCard>();
 
   constructor(private readonly publicBaseUrl: string) {}
 
@@ -119,9 +120,11 @@ export class LocalCardProvider implements CardProvider {
         "Local card failsafe only runs in Sandbox mode. Enable Sandbox mode or configure the real StraitsX card provider.",
       );
     }
+    const existing = this.issued.get(request.idempotencyKey);
+    if (existing) return structuredClone(existing);
     const cardId = `local-card-${crypto.randomUUID()}`;
     const last4 = String(1000 + Math.floor(Math.random() * 9000));
-    return {
+    const card: IssuedCard = {
       cardId,
       last4,
       agentAccess: {
@@ -130,6 +133,8 @@ export class LocalCardProvider implements CardProvider {
         expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       },
     };
+    this.issued.set(request.idempotencyKey, card);
+    return structuredClone(card);
   }
 
   async topUp(): Promise<TopUpResult> {

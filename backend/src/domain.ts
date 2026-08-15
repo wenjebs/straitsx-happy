@@ -85,6 +85,9 @@ export interface PurchaseRun {
   candidateIndex: number;
   attemptIndex: number;
   attemptId?: string | undefined;
+  cardGrantHash?: string | undefined;
+  cardGrantExpiresAt?: string | undefined;
+  cardClaimedAt?: string | undefined;
   cardId?: string | undefined;
   cardLast4?: string | undefined;
   processedEventIds: string[];
