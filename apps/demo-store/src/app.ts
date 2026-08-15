@@ -70,6 +70,34 @@ app.get("/checkout", (c) => {
   );
 });
 
+// A checkout with a decoy form ABOVE the payment form — newsletter signup, the way real
+// merchants build them. Exists to prove the card filler submits the form holding the card
+// number rather than the page's first submit button.
+app.get("/checkout-decoy", (c) => {
+  const item = ITEMS[c.req.query("sku") ?? ""];
+  if (!item) return c.text("not found", 404);
+  return c.html(
+    layout(`
+    <h1>Checkout — ${item.name}</h1>
+    <form method="post" action="/newsletter">
+      <label>Email <input name="email" type="email"></label>
+      <button type="submit">Subscribe</button>
+    </form>
+    <p data-total-cents="${item.priceCents}">Total: S$${(item.priceCents / 100).toFixed(2)}</p>
+    <form method="post" action="/checkout">
+      <input type="hidden" name="sku" value="${item.sku}">
+      <label>Card number <input name="cardNumber" autocomplete="cc-number"></label>
+      <label>Expiry <input name="expiry" autocomplete="cc-exp" placeholder="MM/YY"></label>
+      <label>CVC <input name="cvc" autocomplete="cc-csc"></label>
+      <label>Name on card <input name="name" autocomplete="cc-name"></label>
+      <button type="submit">Pay</button>
+    </form>
+  `),
+  );
+});
+
+app.post("/newsletter", (c) => c.html(layout(`<h1>Subscribed</h1>`)));
+
 app.post("/checkout", async (c) => {
   const form = await c.req.parseBody();
   const pan = String(form.cardNumber ?? "").replace(/\s/g, "");

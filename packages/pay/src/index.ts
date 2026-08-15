@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { readAudit } from "./audit.js";
 import { payWithCard as fill } from "./checkout.js";
+import type { CheckoutOptions } from "./checkout.js";
 import { type Cents, type Config, loadConfig } from "./config.js";
 import { type Db, openDb } from "./db.js";
 import { MockIssuer } from "./issuer/mock.js";
@@ -14,6 +15,7 @@ import { TokenBucket } from "./x402/bucket.js";
 
 export type { Cents } from "./config.js";
 export { MandateError } from "./ledger.js";
+export type { CheckoutOptions, CheckoutResult } from "./checkout.js";
 export type { Decision, Reason } from "./rules.js";
 
 type Ctx = { cfg: Config; db: Db; wallet: Wallet; issuer: IssuerAdapter; stopRecon: () => void };
@@ -138,9 +140,9 @@ export async function issueCard(purchaseId: string, finalTotalCents: Cents) {
   return { last4: r.last4, expiresAt: r.expiresAt, settlementTx: r.settlementTx };
 }
 
-export async function payWithCard(page: Page, purchaseId: string) {
+export async function payWithCard(page: Page, purchaseId: string, opts: CheckoutOptions = {}) {
   const { db, issuer } = get();
-  return fill({ db, issuer }, page, purchaseId);
+  return fill({ db, issuer }, page, purchaseId, opts);
 }
 
 export async function complete(purchaseId: string, orderRef: string | null) {

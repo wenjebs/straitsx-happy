@@ -10,6 +10,21 @@ export type CheckoutResult = {
   error?: "FIELDS_NOT_FOUND" | "CARD_UNREADABLE" | "DECLINED" | "TIMEOUT";
 };
 
+export type CheckoutOptions = {
+  /**
+   * Merchant-specific confirmation, consulted ONLY when the built-in check finds no
+   * `[data-order-ref]`. Return the real order reference, or null if you cannot prove the order
+   * landed. Returning a fabricated string marks a purchase DONE that may never have charged.
+   *
+   * Without this, a successful order at any merchant that does not use `[data-order-ref]` — i.e.
+   * every real one — comes back as TIMEOUT, and a caller that cancels on failure strands money
+   * that actually bought something.
+   */
+  confirm?: (page: Page) => Promise<string | null>;
+  /** Overrides submit-button discovery. Use when the checkout's markup defeats the default. */
+  submitSelector?: string;
+};
+
 const SELECTORS = {
   number: [
     'input[autocomplete="cc-number"]',
@@ -27,21 +42,37 @@ const SELECTORS = {
   name: ['input[autocomplete="cc-name"]', 'input[name*="cardholder" i]', 'input[name="name"]'],
 };
 
-async function fillFirst(page: Page, candidates: string[], value: string): Promise<boolean> {
+/** Returns the selector that matched, so the caller can scope later queries to the same form. */
+async function fillFirst(page: Page, candidates: string[], value: string): Promise<string | null> {
   for (const sel of candidates) {
     const el = page.locator(sel).first();
     if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
       await el.fill(value);
-      return true;
+      return sel;
     }
   }
-  return false;
+  return null;
+}
+
+/**
+ * Prefers the submit control inside the form holding the card number. A real checkout page
+ * routinely carries other forms — newsletter signup, coupon codes, search — and clicking the
+ * page's first submit button can fire one of those instead of paying.
+ */
+async function submitLocator(page: Page, numberSelector: string, override?: string) {
+  if (override) return page.locator(override).first();
+  const scoped = page.locator(
+    `form:has(${numberSelector}) button[type="submit"], form:has(${numberSelector}) input[type="submit"]`,
+  );
+  if ((await scoped.count()) > 0) return scoped.first();
+  return page.locator('button[type="submit"], input[type="submit"]').first();
 }
 
 export async function payWithCard(
   deps: CheckoutDeps,
   page: Page,
   purchaseId: string,
+  opts: CheckoutOptions = {},
 ): Promise<CheckoutResult> {
   const card = deps.db.raw
     .prepare(`SELECT * FROM cards WHERE purchase_id=?`)
@@ -56,8 +87,8 @@ export async function payWithCard(
     return { ok: false, error: "CARD_UNREADABLE" };
   }
 
-  const okNumber = await fillFirst(page, SELECTORS.number, material.pan);
-  if (!okNumber) return { ok: false, error: "FIELDS_NOT_FOUND" };
+  const numberSelector = await fillFirst(page, SELECTORS.number, material.pan);
+  if (!numberSelector) return { ok: false, error: "FIELDS_NOT_FOUND" };
   await fillFirst(page, SELECTORS.expiry, material.expiry);
   await fillFirst(page, SELECTORS.cvc, material.cvc);
   await fillFirst(page, SELECTORS.name, "Happy Agent");
@@ -67,9 +98,10 @@ export async function payWithCard(
     // waitForLoadState inspects the CURRENT page, which is already loaded, so racing it against
     // the click resolves instantly and we would read the pre-submit DOM. Wait for the navigation
     // the submit causes instead.
+    const submit = await submitLocator(page, numberSelector, opts.submitSelector);
     await Promise.all([
       page.waitForNavigation({ waitUntil: "load", timeout: 20_000 }),
-      page.locator('button[type="submit"], input[type="submit"]').first().click(),
+      submit.click(),
     ]);
   } catch {
     return { ok: false, error: "TIMEOUT" };
@@ -85,6 +117,16 @@ export async function payWithCard(
   if (ref) {
     appendAudit(deps.db, { purchaseId, kind: "CHECKOUT_OK", detail: { orderRef: ref } });
     return { ok: true, orderRef: ref };
+  }
+
+  // The built-in check is demo-store shaped. Real merchants need a caller-supplied strategy;
+  // it may only CONFIRM an order, never invent one.
+  if (opts.confirm) {
+    const confirmed = await opts.confirm(page).catch(() => null);
+    if (confirmed) {
+      appendAudit(deps.db, { purchaseId, kind: "CHECKOUT_OK", detail: { orderRef: confirmed } });
+      return { ok: true, orderRef: confirmed };
+    }
   }
 
   const body = (await page.content()).toLowerCase();

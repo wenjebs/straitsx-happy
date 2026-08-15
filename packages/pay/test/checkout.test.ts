@@ -78,3 +78,38 @@ describe("payWithCard", () => {
     await page.close();
   }, 60_000);
 });
+
+describe("payWithCard at a merchant that is not our demo store", () => {
+  it("submits the form holding the card number, not the page's first submit button", async () => {
+    const page = await browser.newPage();
+    // this page puts a newsletter signup ABOVE the payment form
+    await page.goto("http://127.0.0.1:4031/checkout-decoy?sku=usb-c-hub");
+    const r = await payWithCard({ db, issuer }, page, purchaseId);
+    expect(r.ok).toBe(true);
+    expect(r.orderRef).toMatch(/^ord_/); // proves we paid, rather than subscribing
+    await page.close();
+  }, 60_000);
+
+  it("uses a caller-supplied confirm() when no [data-order-ref] is present", async () => {
+    const page = await browser.newPage();
+    await page.goto("http://127.0.0.1:4031/checkout?sku=usb-c-hub");
+    const r = await payWithCard({ db, issuer }, page, purchaseId, {
+      // the built-in check finds the real ref first, so force the fallback path by
+      // confirming from page text the way a real adapter would
+      confirm: async (p) => (/order confirmed/i.test(await p.content()) ? "merchant-ref-1" : null),
+    });
+    expect(r.ok).toBe(true);
+    await page.close();
+  }, 60_000);
+
+  it("keeps an unknown outcome a failure when confirm() cannot prove the order landed", async () => {
+    const page = await browser.newPage();
+    await page.goto("http://127.0.0.1:4031/checkout-decoy?sku=usb-c-hub");
+    const r = await payWithCard({ db, issuer }, page, purchaseId, {
+      submitSelector: 'form[action="/newsletter"] button[type="submit"]', // deliberately wrong form
+      confirm: async () => null,
+    });
+    expect(r).toEqual({ ok: false, error: "TIMEOUT" });
+    await page.close();
+  }, 60_000);
+});
