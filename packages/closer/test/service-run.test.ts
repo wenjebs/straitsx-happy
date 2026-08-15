@@ -203,6 +203,27 @@ describe("purchase run", () => {
     expect(released).toHaveLength(1);
   });
 
+  /*
+   * The last line of defence. Everything between opening the listing and typing the card can
+   * navigate — a model choosing links, a merchant redirect, a page that rewrites itself. Landing
+   * somewhere else and typing anyway hands a real card to whoever is on the other end.
+   */
+  it("refuses to type the card if the page has left the approved merchant", async () => {
+    const { deps, posted } = harness();
+    let filled = false;
+    const strayPage = { url: () => "https://evilmerchant.test/checkout" } as unknown as Page;
+    deps.browserFor = async () => ({ newPage: async () => strayPage });
+    deps.fillCard = async () => {
+      filled = true;
+    };
+    deps.jobs.accept(jobInput());
+    await runPurchase(deps, jobInput());
+
+    expect(filled).toBe(false);
+    expect(posted.at(-1)?.type).toBe("purchase.failed");
+    expect(String(posted.at(-1)?.message)).toMatch(/refusing to enter card details/i);
+  });
+
   it("calls toPaymentPage before reading the total", async () => {
     const order: string[] = [];
     const { deps } = harness();

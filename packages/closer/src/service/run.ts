@@ -5,6 +5,7 @@ import { eventIdFor, type PurchaseEvent, sendCallback } from "./callbacks.js";
 import type { JobStore } from "./jobs.js";
 import type { LiveView } from "./liveview.js";
 import { type RunLog, runLogger } from "./log.js";
+import { isSameSite } from "./navigator.js";
 import { type PurchaseJobInput, verifyGrant, verifyMerchantTotal } from "./verify.js";
 
 /**
@@ -120,7 +121,23 @@ export async function runPurchase(deps: RunDeps, job: PurchaseJobInput): Promise
       // last4 only. Never the pan, expiry or cvc — a log line is a card leak.
       log("card claimed", { last4: claimed.last4 });
       const material = await revealCard(claimed.agentAccess, deps.fetchImpl);
-      log("card revealed, typing into checkout");
+
+      /*
+       * The last line of defence, checked with the card in hand and about to be typed.
+       *
+       * Everything between opening the listing and here can navigate: a model choosing links, a
+       * merchant redirect, a page that rewrites itself. If any of that has landed us somewhere
+       * other than the approved shop, the next statement types a real card number into whoever is
+       * on the other end. Cheap to check, unrecoverable to skip.
+       */
+      const approvedHost = new URL(job.listing.url ?? "").hostname;
+      if (!isSameSite(page.url(), approvedHost)) {
+        throw new Error(
+          `refusing to enter card details on ${new URL(page.url()).hostname}, which is not ${approvedHost}`,
+        );
+      }
+
+      log("card revealed, typing into checkout", { host: approvedHost });
       await deps.fillCard(page, material);
       log("card fields filled");
       await emit({ type: "checkout.prepared", message: `${job.listing.seller} checkout ready` });

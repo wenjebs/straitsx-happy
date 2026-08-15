@@ -255,11 +255,11 @@ async function apply(
 
   if (action.action === "click") {
     await target.click({ timeout: 10_000 });
-    // A click can navigate. Leaving the approved merchant means buying something else.
+    // A click can navigate. Leaving the approved merchant means buying something else — or worse,
+    // handing the card to whoever is on the other end.
     await page.waitForTimeout(500);
-    const host = new URL(page.url()).hostname.replace(/^www\./, "");
-    if (!host.endsWith(allowedHost.replace(/^www\./, ""))) {
-      throw new Error(`navigator left ${allowedHost} for ${host}`);
+    if (!isSameSite(page.url(), allowedHost)) {
+      throw new Error(`navigator left ${allowedHost} for ${new URL(page.url()).hostname}`);
     }
     return;
   }
@@ -274,6 +274,28 @@ async function apply(
   if (action.action === "select") {
     await target.selectOption(action.value).catch(() => {});
   }
+}
+
+/**
+ * Is this URL still on the approved merchant?
+ *
+ * A dot boundary, not a suffix. `endsWith("cocomo.sg")` also accepts `evilcocomo.sg`, and this is
+ * the check standing between a prompt-injected page and an attacker's checkout — where
+ * `typeCardInto` would type a real card into their form. `shop.cocomo.sg` is fine; anything that
+ * merely ends with the same letters is not.
+ */
+export function isSameSite(url: string, allowedHost: string): boolean {
+  let host: string;
+  try {
+    const parsed = new URL(url);
+    // A same-site http(s) check only. javascript: and data: are not merchants.
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+  const allowed = allowedHost.toLowerCase().replace(/^www\./, "");
+  return host === allowed || host.endsWith(`.${allowed}`);
 }
 
 /** A crude shape check. The model is told never to do this; this makes it impossible. */

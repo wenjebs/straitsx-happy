@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  isSameSite,
   looksLikeCard,
   navigateToPayment,
   observe,
@@ -78,6 +79,31 @@ describe("card-shaped text", () => {
   it("does not flag ordinary checkout input", () => {
     expect(looksLikeCard("someone@example.com")).toBe(false);
     expect(looksLikeCard("018956")).toBe(false);
+  });
+});
+
+describe("staying on the approved merchant", () => {
+  it("accepts the shop and its subdomains", () => {
+    expect(isSameSite("https://cocomo.sg/products/x", "cocomo.sg")).toBe(true);
+    expect(isSameSite("https://www.cocomo.sg/checkout", "cocomo.sg")).toBe(true);
+    expect(isSameSite("https://shop.cocomo.sg/checkout", "www.cocomo.sg")).toBe(true);
+  });
+
+  /*
+   * The bypass this function exists for. endsWith("cocomo.sg") also accepts "evilcocomo.sg", and
+   * this check is what stands between a prompt-injected page and an attacker's checkout — where
+   * typeCardInto would type a real card into their form.
+   */
+  it("rejects a lookalike host that merely ends with the same letters", () => {
+    expect(isSameSite("https://evilcocomo.sg/checkout", "cocomo.sg")).toBe(false);
+    expect(isSameSite("https://cocomo.sg.attacker.com/checkout", "cocomo.sg")).toBe(false);
+    expect(isSameSite("https://notcocomo.sg/", "cocomo.sg")).toBe(false);
+  });
+
+  it("rejects anything that is not http(s)", () => {
+    expect(isSameSite("javascript:alert(1)", "cocomo.sg")).toBe(false);
+    expect(isSameSite("data:text/html,<h1>hi</h1>", "cocomo.sg")).toBe(false);
+    expect(isSameSite("not a url", "cocomo.sg")).toBe(false);
   });
 });
 
