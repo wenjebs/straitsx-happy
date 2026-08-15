@@ -259,6 +259,66 @@ jobs:
             --retry 12 --retry-delay 10 --retry-all-errors \
             "$HEALTH_URL"
 
+      - name: Diagnose backend deployment failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          cluster="${TF_VAR_project_name}-${TF_VAR_environment}"
+          service="backend"
+          log_group="/ecs/${cluster}/backend"
+          target_group_name="${cluster}-backend"
+
+          echo "### ECS service"
+          aws ecs describe-services \
+            --cluster "$cluster" \
+            --services "$service" \
+            --query 'services[0].{status:status,desired:desiredCount,running:runningCount,pending:pendingCount,deployments:deployments[*].{status:status,rolloutState:rolloutState,reason:rolloutStateReason,desired:desiredCount,running:runningCount,pending:pendingCount},events:events[0:10].[createdAt,message]}' \
+            --output json
+
+          echo "### ECS tasks"
+          task_arns="$(aws ecs list-tasks \
+            --cluster "$cluster" \
+            --service-name "$service" \
+            --desired-status STOPPED \
+            --max-items 10 \
+            --query 'taskArns' \
+            --output text) $(aws ecs list-tasks \
+            --cluster "$cluster" \
+            --service-name "$service" \
+            --desired-status RUNNING \
+            --query 'taskArns' \
+            --output text)"
+          read -r -a tasks <<< "$task_arns"
+          if (( ${#tasks[@]} > 0 )); then
+            aws ecs describe-tasks \
+              --cluster "$cluster" \
+              --tasks "${tasks[@]}" \
+              --query 'tasks[*].{task:taskArn,lastStatus:lastStatus,health:healthStatus,stoppedReason:stoppedReason,containers:containers[*].{name:name,lastStatus:lastStatus,exitCode:exitCode,reason:reason}}' \
+              --output json
+          fi
+
+          echo "### ALB target health"
+          target_group_arn="$(aws elbv2 describe-target-groups \
+            --names "$target_group_name" \
+            --query 'TargetGroups[0].TargetGroupArn' \
+            --output text)"
+          if [[ -n "$target_group_arn" && "$target_group_arn" != "None" ]]; then
+            aws elbv2 describe-target-health \
+              --target-group-arn "$target_group_arn" \
+              --query 'TargetHealthDescriptions[*].{target:Target.Id,port:Target.Port,state:TargetHealth.State,reason:TargetHealth.Reason,description:TargetHealth.Description}' \
+              --output table
+          fi
+
+          echo "### Recent backend logs"
+          aws logs tail "$log_group" --since 20m --format short
+
+          health_url="$(terraform -chdir=terraform output -raw backend_health_url 2>/dev/null)"
+          if [[ -n "$health_url" ]]; then
+            echo "### Public health response"
+            curl --silent --show-error --include --max-time 30 "$health_url"
+          fi
+
       - name: Write deployment summary
         env:
           APP_URL: ${{ steps.deploy_frontend.outputs.app_url }}
