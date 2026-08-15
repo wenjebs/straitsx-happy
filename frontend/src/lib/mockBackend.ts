@@ -147,6 +147,7 @@ class MockBackend {
   private settings: Settings = {
     region: "Singapore · SGD",
     dataRetention: "90 days",
+    shippingAddress: null,
   };
 
   // -- transport ------------------------------------------------------------

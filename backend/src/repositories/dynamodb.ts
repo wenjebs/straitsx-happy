@@ -263,6 +263,7 @@ export class DynamoRepository implements Repository {
     return {
       region: settings.region,
       dataRetention: settings.dataRetention,
+      shippingAddress: settings.shippingAddress ?? null,
     };
   }
 

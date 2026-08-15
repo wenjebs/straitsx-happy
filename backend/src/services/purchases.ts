@@ -2,12 +2,14 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config.js";
 import type {
   Activity,
-  PurchaseAttempt,
   ExecutionRow,
   Listing,
   LogLine,
   Mandate,
+  PurchaseAttempt,
   PurchaseRun,
+  Settings,
+  ShippingAddress,
   Wallet,
   WishlistItem,
 } from "../domain.js";
@@ -52,10 +54,12 @@ export class PurchaseService {
       throw new HttpError(503, "The Closer purchase agent is not configured.");
     }
 
-    const [mandate, wallet] = await Promise.all([
+    const [mandate, settings, wallet] = await Promise.all([
       this.repository.getMandate(activity.userId),
+      this.repository.getSettings(activity.userId),
       this.repository.getWallet(activity.userId),
     ]);
+    this.requireShippingAddress(settings);
     this.assertMandate(activity, mandate, wallet);
 
     const claim = await this.repository.claimPurchase(activityId, idempotencyKey);
@@ -269,10 +273,6 @@ export class PurchaseService {
     if (listing.amountMinor > wallet.balanceMinor) {
       throw new HttpError(422, "Wallet balance is below the exact card amount.");
     }
-    if (this.cards.mode === "local" && !settings.sandbox) {
-      throw new HttpError(409, "Local card claims require Sandbox mode.");
-    }
-
     const attemptKey = `${run.idempotencyKey}:${item.id}:${attempt.candidateIndex}:${attempt.attemptIndex}`;
     const firstClaim = !attempt.cardClaimedAt;
     const card = await this.cards.issueCard({
@@ -350,11 +350,11 @@ export class PurchaseService {
       this.repository.getPurchaseRun(activityId),
     ]);
     if (run?.status !== "running" || activity.status !== "live") return;
-
     const [mandate, settings] = await Promise.all([
       this.repository.getMandate(activity.userId),
       this.repository.getSettings(activity.userId),
     ]);
+    const shippingAddress = this.requireShippingAddress(settings);
 
     const inFlight = new Set(Object.values(run.attempts).map((a) => a.itemId));
     const starts: Promise<void>[] = [];
@@ -388,7 +388,16 @@ export class PurchaseService {
       inFlight.add(pick.itemId);
 
       starts.push(
-        this.dispatchAttempt(activity, run, attempt, item, listing, grantToken, grantExpiresAt, settings.sandbox),
+        this.dispatchAttempt(
+          activity,
+          run,
+          attempt,
+          item,
+          listing,
+          grantToken,
+          grantExpiresAt,
+          shippingAddress,
+        ),
       );
     }
 
@@ -461,7 +470,7 @@ export class PurchaseService {
     listing: Listing,
     grantToken: string,
     grantExpiresAt: string,
-    sandbox: boolean,
+    shippingAddress: ShippingAddress,
   ): Promise<void> {
     const attemptKey = `${run.idempotencyKey}:${item.id}:${attempt.candidateIndex}:${attempt.attemptIndex}`;
     try {
@@ -470,6 +479,7 @@ export class PurchaseService {
         attemptId: attempt.attemptId,
         item,
         listing,
+        shippingAddress,
         cardGrant: {
           claimUrl: `${this.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/v1/integrations/purchases/${encodeURIComponent(activity.id)}/attempts/${encodeURIComponent(attempt.attemptId)}/card`,
           token: grantToken,
@@ -477,7 +487,7 @@ export class PurchaseService {
           currency: "SGD",
           expiresAt: grantExpiresAt,
         },
-        sandbox,
+        sandbox: this.cards.mode === "local" || this.purchaseAgents.mode === "local",
         idempotencyKey: attemptKey,
       });
     } catch (error) {
@@ -492,7 +502,7 @@ export class PurchaseService {
       // to the stored run while this dispatch was outstanding, and persisting a stale copy would
       // throw their card claims and their completed items away.
       const fresh = await this.repository.getPurchaseRun(activity.id);
-      if (!fresh || fresh.status !== "running") return;
+      if (fresh?.status !== "running") return;
       this.progressFor(fresh, item.id).attemptIndex += 1;
       this.clearAttempt(fresh, attempt.attemptId);
       await this.repository.putPurchaseRun(fresh);
@@ -503,7 +513,9 @@ export class PurchaseService {
   private async completeIfDone(activity: Activity, run: PurchaseRun): Promise<void> {
     if (run.status !== "running") return;
     if (Object.keys(run.attempts).length > 0) return;
-    const unfinished = activity.shortlist.filter((pick) => !this.progressFor(run, pick.itemId).done);
+    const unfinished = activity.shortlist.filter(
+      (pick) => !this.progressFor(run, pick.itemId).done,
+    );
     if (unfinished.length > 0) return;
 
     run.status = "completed";
@@ -519,7 +531,8 @@ export class PurchaseService {
     activity.totalMinor = bought.reduce((sum, row) => sum + row.listing.amountMinor, 0);
     activity.archiveLines = bought.map((row) => ({
       name:
-        activity.wishlist.find((wishlistItem) => wishlistItem.id === row.itemId)?.name ?? row.itemId,
+        activity.wishlist.find((wishlistItem) => wishlistItem.id === row.itemId)?.name ??
+        row.itemId,
       seller: row.listing.seller,
       price: row.listing.price,
     }));
@@ -647,6 +660,16 @@ export class PurchaseService {
         `Payment rail denied ${item.name}: ${listing.price} is outside the issuable range ${formatMinor(this.config.PAYMENT_MIN_MINOR)}–${formatMinor(this.config.PAYMENT_MAX_MINOR)}.`,
       );
     }
+  }
+
+  private requireShippingAddress(settings: Settings): ShippingAddress {
+    if (!settings.shippingAddress) {
+      throw new HttpError(
+        422,
+        "Add and save a delivery address in Settings before starting a purchase.",
+      );
+    }
+    return settings.shippingAddress;
   }
 
   /** Marks this attempt's card spent-or-dead in the wallet. Never touches another attempt's. */

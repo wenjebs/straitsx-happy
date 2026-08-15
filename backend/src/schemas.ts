@@ -42,10 +42,24 @@ export const MandatePatch = z
   })
   .strict();
 
+const ShippingAddress = z
+  .object({
+    recipientName: z.string().trim().min(1).max(120),
+    addressLine1: z.string().trim().min(1).max(200),
+    addressLine2: z.string().trim().max(200),
+    city: z.string().trim().min(1).max(100),
+    stateOrProvince: z.string().trim().max(100),
+    postalCode: z.string().trim().min(2).max(20),
+    country: z.string().trim().min(2).max(80),
+    phone: z.string().trim().max(40),
+  })
+  .strict();
+
 export const SettingsPatch = z
   .object({
     region: z.string().min(1).max(120).optional(),
     dataRetention: z.string().min(1).max(120).optional(),
+    shippingAddress: ShippingAddress.optional(),
   })
   .strict();
 
