@@ -119,6 +119,16 @@ export async function payWithCard(
     return { ok: true, orderRef: ref };
   }
 
+  // Declines are settled BEFORE any caller strategy runs. A confirm() loose enough to match
+  // "we could not process your order" would otherwise mark a purchase DONE that never charged —
+  // reporting goods that do not exist, which is worse than reporting a failure that succeeded.
+  // The library owns this precedence so a single sloppy adapter cannot invert it.
+  const body = (await page.content()).toLowerCase();
+  if (body.includes("declin")) {
+    appendAudit(deps.db, { purchaseId, kind: "DECLINED", detail: {} });
+    return { ok: false, error: "DECLINED" };
+  }
+
   // The built-in check is demo-store shaped. Real merchants need a caller-supplied strategy;
   // it may only CONFIRM an order, never invent one.
   if (opts.confirm) {
@@ -127,12 +137,6 @@ export async function payWithCard(
       appendAudit(deps.db, { purchaseId, kind: "CHECKOUT_OK", detail: { orderRef: confirmed } });
       return { ok: true, orderRef: confirmed };
     }
-  }
-
-  const body = (await page.content()).toLowerCase();
-  if (body.includes("declin")) {
-    appendAudit(deps.db, { purchaseId, kind: "DECLINED", detail: {} });
-    return { ok: false, error: "DECLINED" };
   }
 
   // No order reference and no decline: we do not know what happened. Reporting success here
