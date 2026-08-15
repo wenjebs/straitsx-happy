@@ -25,6 +25,24 @@ export interface LiveView {
 
 type Channel = { clients: Set<ServerResponse>; blanked: boolean };
 
+/**
+ * Attempt ids reach this file straight from the URL path of an unauthenticated route, and get
+ * interpolated into a <script> block. Without this an id containing `</script>` executes attacker
+ * script in the live view's own origin — and that page is precisely the thing that blanks during
+ * card entry, so injected script could re-enable frame rendering and read the card number off the
+ * canvas. Happy's ids are `attempt_...`, so a conservative whitelist costs nothing.
+ */
+export const ATTEMPT_ID = /^[A-Za-z0-9_-]{1,160}$/;
+
+export function isValidAttemptId(id: string): boolean {
+  return ATTEMPT_ID.test(id);
+}
+
+/** Belt and braces alongside the whitelist: keeps a literal from closing the script element. */
+function safeJson(value: string): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+}
+
 export function createLiveView(): LiveView {
   const channels = new Map<string, Channel>();
 
@@ -60,7 +78,7 @@ export function createLiveView(): LiveView {
 <div id="wrap"><canvas id="c"></canvas></div>
 <div id="msg"></div>
 <script>
-  var attemptId = ${JSON.stringify(attemptId)};
+  var attemptId = ${safeJson(attemptId)};
   var c = document.getElementById('c'), ctx = c.getContext('2d'), msg = document.getElementById('msg');
   var es = new EventSource('/v1/live/' + encodeURIComponent(attemptId) + '/stream');
   es.addEventListener('frame', function (e) {

@@ -91,4 +91,24 @@ describe("purchase service http", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("<canvas");
   });
+
+  /*
+   * That page is what blanks during card entry, and the route takes an id straight from an
+   * unauthenticated URL into a <script> block. Script running in that origin could re-enable frame
+   * rendering and read the card off the canvas, so a malformed id is refused outright.
+   */
+  it("refuses an attempt id that could break out of the script block", async () => {
+    const evil = encodeURIComponent('</script><script>alert(1)</script>');
+    const res = await fetch(`${base}/v1/live/${evil}`);
+    expect(res.status).toBe(400);
+
+    const stream = await fetch(`${base}/v1/live/${evil}/stream`);
+    expect(stream.status).toBe(400);
+  });
+
+  it("locks the live view page down with a content security policy", async () => {
+    const res = await fetch(`${base}/v1/live/attempt_1`);
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
 });

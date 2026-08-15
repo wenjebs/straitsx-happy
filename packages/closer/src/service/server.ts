@@ -3,7 +3,7 @@ import { chromium } from "playwright";
 import { startAgentCoreSession } from "../agentcore.js";
 import type { BrowserLike } from "../types.js";
 import { createJobStore, type JobStore } from "./jobs.js";
-import { createLiveView, type LiveView } from "./liveview.js";
+import { createLiveView, isValidAttemptId, type LiveView } from "./liveview.js";
 import type { PurchaseJobInput } from "./verify.js";
 
 /**
@@ -30,8 +30,18 @@ export function createPurchaseServer(opts: {
     // approved, and is blanked across card entry.
     if (req.method === "GET" && parts[0] === "v1" && parts[1] === "live") {
       const attemptId = decodeURIComponent(parts[2] ?? "");
+      // Rejected rather than escaped-and-served: this route is unauthenticated and its page is
+      // what blanks during card entry, so script running in that origin could re-enable frame
+      // rendering and read the card off the canvas.
+      if (!isValidAttemptId(attemptId)) return send(res, 400, { error: "bad attempt id" });
       if (parts[3] === "stream") return view.attach(attemptId, res);
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        // The page needs only its own inline script and the data: URIs it builds from frames.
+        "content-security-policy":
+          "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+        "x-content-type-options": "nosniff",
+      });
       return res.end(view.page(attemptId));
     }
 
