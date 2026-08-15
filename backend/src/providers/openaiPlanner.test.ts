@@ -24,7 +24,7 @@ describe("OpenAIPlannerProvider", () => {
                       wishlist: [
                         {
                           name: "Desk lamp",
-                          short: "lamp",
+                          short: "USB-C cable accessory",
                           spec: "dimmable LED",
                           budget: "S$30–S$45",
                           category: "General",
@@ -84,10 +84,18 @@ describe("OpenAIPlannerProvider", () => {
     expect(calls).toHaveLength(2);
     const request = JSON.parse(String(calls[0]?.init?.body)) as {
       store: boolean;
-      text: { format: { type: string; strict: boolean } };
+      text: { format: { type: string; strict: boolean; schema: unknown } };
     };
     expect(request.store).toBe(false);
-    expect(request.text.format).toMatchObject({ type: "json_schema", strict: true });
+    expect(request.text.format).toMatchObject({
+      type: "json_schema",
+      strict: true,
+      schema: {
+        properties: {
+          wishlist: { items: { properties: { short: { minLength: 1, maxLength: 16 } } } },
+        },
+      },
+    });
     const callback = JSON.parse(String(calls[1]?.init?.body)) as {
       type: string;
       wishlist: { id: string; short: string }[];
@@ -95,7 +103,11 @@ describe("OpenAIPlannerProvider", () => {
     };
     expect(callback.type).toBe("wishlist.ready");
     expect(callback.wishlist).toHaveLength(2);
-    expect(callback.wishlist[0]).toMatchObject({ id: "item-1-desk-lamp", short: "LAMP" });
+    expect(callback.wishlist[0]).toMatchObject({
+      id: "item-1-desk-lamp",
+      short: "USB-C CABLE ACCE",
+    });
+    expect(callback.wishlist[0]?.short).toHaveLength(16);
     expect(callback.clarifications[0]?.itemId).toBe("item-1-desk-lamp");
   });
 });

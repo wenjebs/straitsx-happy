@@ -12,7 +12,10 @@ const PlannedWishlist = z.object({
     .array(
       z.object({
         name: z.string().min(1).max(240),
-        short: z.string().min(1).max(16),
+        // Accept a verbose model label here, then normalize it to the callback's
+        // 16-character UI contract. The JSON Schema also asks the model to stay
+        // within that contract, but this keeps one imperfect response recoverable.
+        short: z.string().min(1).max(240),
         spec: z.string().min(1).max(1000),
         budget: z.string().min(1).max(100),
         category: z.string().min(1).max(100),
@@ -126,7 +129,7 @@ export class OpenAIPlannerProvider implements PlannerProvider {
       wishlist: plan.wishlist.map((item, index) => ({
         id: ids[index],
         ...item,
-        short: item.short.toUpperCase(),
+        short: normalizeShort(item.short),
         hueIndex: index % 6,
       })),
       clarifications: plan.clarifications.map((row) => ({
@@ -192,14 +195,18 @@ function itemId(name: string, index: number): string {
   return `item-${index + 1}-${slug || "product"}`;
 }
 
+function normalizeShort(value: string): string {
+  return Array.from(value.trim().replace(/\s+/g, " ").toUpperCase()).slice(0, 16).join("");
+}
+
 const wishlistJsonSchema = {
   type: "object",
   additionalProperties: false,
   required: ["title", "reply", "wishlistEstimate", "wishlist", "clarifications"],
   properties: {
-    title: { type: "string" },
-    reply: { type: "string" },
-    wishlistEstimate: { type: "string" },
+    title: { type: "string", minLength: 1, maxLength: 240 },
+    reply: { type: "string", minLength: 1, maxLength: 4000 },
+    wishlistEstimate: { type: "string", minLength: 1, maxLength: 100 },
     wishlist: {
       type: "array",
       minItems: 1,
@@ -209,11 +216,11 @@ const wishlistJsonSchema = {
         additionalProperties: false,
         required: ["name", "short", "spec", "budget", "category"],
         properties: {
-          name: { type: "string" },
-          short: { type: "string" },
-          spec: { type: "string" },
-          budget: { type: "string" },
-          category: { type: "string" },
+          name: { type: "string", minLength: 1, maxLength: 240 },
+          short: { type: "string", minLength: 1, maxLength: 16 },
+          spec: { type: "string", minLength: 1, maxLength: 1000 },
+          budget: { type: "string", minLength: 1, maxLength: 100 },
+          category: { type: "string", minLength: 1, maxLength: 100 },
         },
       },
     },
@@ -226,7 +233,7 @@ const wishlistJsonSchema = {
         required: ["itemIndex", "prompt", "options"],
         properties: {
           itemIndex: { type: "integer", minimum: 0, maximum: 9 },
-          prompt: { type: "string" },
+          prompt: { type: "string", minLength: 1, maxLength: 1000 },
           options: {
             type: "array",
             minItems: 2,
@@ -236,10 +243,10 @@ const wishlistJsonSchema = {
               additionalProperties: false,
               required: ["name", "range", "why", "imgLabel"],
               properties: {
-                name: { type: "string" },
-                range: { type: "string" },
-                why: { type: "string" },
-                imgLabel: { type: "string" },
+                name: { type: "string", minLength: 1, maxLength: 240 },
+                range: { type: "string", maxLength: 100 },
+                why: { type: "string", maxLength: 1000 },
+                imgLabel: { type: "string", maxLength: 100 },
               },
             },
           },
