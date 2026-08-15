@@ -34,8 +34,8 @@ region during `terraform init`; do not commit them.
 `.github/workflows/deploy-aws.yml` typechecks the workspace, tests the deployed application
 packages, assumes an AWS role with GitHub OIDC, stores Terraform state in a protected/versioned S3
 bucket, builds the backend into ECR, deploys it to ECS, builds the frontend against the CloudFront
-URL, uploads it to S3, and verifies the public health endpoint. Pushes to `main` deploy `dev`; the
-workflow can also be run manually for `dev` or `prod`.
+URL, uploads it to S3, and verifies the public health endpoint. It deploys only when someone uses
+the **Run workflow** button and selects `dev` or `prod`; pushes never trigger a deployment.
 
 Create a GitHub Environment named `dev` under **Settings → Environments**. Add these environment
 variables:

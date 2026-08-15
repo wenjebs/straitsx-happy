@@ -1,18 +1,6 @@
 name: Deploy to AWS
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/deploy-aws.yml"
-      - "backend/**"
-      - "frontend/**"
-      - "packages/**"
-      - "terraform/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "tsconfig.base.json"
   workflow_dispatch:
     inputs:
       environment:
@@ -29,7 +17,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: happy-aws-${{ inputs.environment || 'dev' }}
+  group: happy-aws-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
@@ -37,15 +25,15 @@ jobs:
     name: Verify and deploy
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: ${{ inputs.environment || 'dev' }}
+    environment: ${{ inputs.environment }}
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-      TF_STATE_KEY: ${{ vars.TF_STATE_KEY || format('happy/{0}/terraform.tfstate', inputs.environment || 'dev') }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY || format('happy/{0}/terraform.tfstate', inputs.environment) }}
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
       TF_VAR_project_name: ${{ vars.TF_PROJECT_NAME || 'happy' }}
-      TF_VAR_environment: ${{ inputs.environment || 'dev' }}
+      TF_VAR_environment: ${{ inputs.environment }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
       TF_VAR_openai_model: ${{ vars.OPENAI_MODEL || 'gpt-5.6-luna' }}
       TF_VAR_agent_api_base_url: ${{ vars.AGENT_API_BASE_URL || '' }}
