@@ -1,0 +1,85 @@
+/*
+ * Design tokens for Happy. Every colour, radius and motion curve in the UI
+ * comes from here — components never hardcode a hex value.
+ *
+ * The shell is strictly black / white / gray. Colour appears in exactly two
+ * places: per-item identity hues, and the chevron progress ramp.
+ */
+
+:root {
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-sunken: #fcfcfd; /* sidebar, activity feed */
+  --surface-raised: #fdfdfe; /* stage bar row */
+  --surface-muted: #fafafa; /* table footers, card headers */
+  --surface-tile: #fbfbfc; /* agent tile body, agent log panel */
+
+  /* Text */
+  --text-primary: #101012;
+  --text-secondary: #3f3f47;
+  --text-tertiary: #6b6b73;
+  --text-quaternary: #9a9aa2;
+  --text-disabled: #b4b4ba;
+
+  /* Lines */
+  --border-strong: #d3d3d8; /* secondary button borders, ticks */
+  --border: #e3e3e6; /* default hairline */
+  --border-subtle: #ececee; /* shell dividers */
+  --border-faint: #f2f2f3; /* in-table row dividers */
+
+  /* Fills */
+  --fill-inactive: #f4f4f5; /* ghost button fill, placeholder stripes */
+  --hover-primary: #2c2c31; /* primary button hover */
+  --hover-surface: #f7f7f8; /* ghost hover */
+  --hover-nav: #f4f4f5; /* nav hover */
+  --nav-active: #f0f0f1;
+
+  /* Chevron progress */
+  --chevron-empty: #e6e6e9;
+  --chevron-cancelled: #c4c4ca;
+
+  /* Radius — quiet and small. Never 16px+ on a card. */
+  --r-chip: 4px;
+  --r-tile: 5px;
+  --r-control: 6px;
+  --r-card: 8px;
+  --r-composer: 12px;
+  --r-bubble: 14px;
+  --r-pill: 999px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-overshoot: cubic-bezier(0.7, -0.4, 0.3, 1.4);
+  --t-sidebar: 200ms var(--ease-out);
+  --t-toggle: 180ms ease;
+  --t-chevron: 420ms ease;
+  --t-row: 300ms ease;
+  --t-tile: 400ms ease;
+  --t-fill: 500ms var(--ease-out);
+
+  /* The two dot transitions the search screen is built around. */
+  --t-dot-forward: left 850ms var(--ease-out);
+  --t-dot-backward: left 1450ms var(--ease-overshoot);
+  --t-dot-glow: box-shadow 600ms ease;
+
+  /* Type */
+  --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Placeholder imagery, until real product photography lands. */
+  --img-placeholder: repeating-linear-gradient(135deg, #f4f4f5 0 6px, #ececee 6px 12px);
+}
+
+/*
+ * Item identity hues. Six moderately saturated oklch hues at matched
+ * lightness/chroma. Assigned by index as items are created; six is the
+ * intended maximum before recycling.
+ */
+:root {
+  --hue-0: oklch(0.55 0.15 258); /* blue    — graphics card */
+  --hue-1: oklch(0.55 0.16 22); /* red     — processor */
+  --hue-2: oklch(0.55 0.11 196); /* cyan    — motherboard */
+  --hue-3: oklch(0.53 0.14 148); /* green   — memory */
+  --hue-4: oklch(0.6 0.14 72); /* amber   — power supply */
+  --hue-5: oklch(0.52 0.17 318); /* magenta — case */
+}

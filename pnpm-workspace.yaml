@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "frontend"
 
 # Postinstall scripts are quarantined by default. These six are native or
 # bundler builds that do not function without compiling:
