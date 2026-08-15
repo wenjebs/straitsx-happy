@@ -164,11 +164,21 @@ export function openAiClient(): ModelClient {
         messages,
         tools,
         tool_choice: "auto",
+        /*
+         * Required, not optional: this model rejects function tools on /chat/completions with a
+         * 400 unless reasoning is off — "use /v1/responses or set reasoning_effort to 'none'".
+         * Every navigation attempt failed on that until it was set.
+         */
+        reasoning_effort: "none",
       }),
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) {
-      throw new Error(`browser agent model call failed (${res.status})`);
+      // The body says WHY. Swallowing it turned a one-line config fix into a black box.
+      const detail = await res.text().catch(() => "");
+      throw new Error(
+        `browser agent model call failed (${res.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      );
     }
     const data = (await res.json()) as {
       choices?: {
