@@ -1,9 +1,11 @@
 /**
  * The verified merchant list.
  *
- * "Verified" means a human reached a guest checkout on the live storefront and confirmed the card
- * fields render — see docs/merchant-shortlist.md for the walkthrough of each one, and
- * packages/closer/demo/links.ts for the browser-reachability test targets they came from.
+ * "Verified" means someone reached a guest checkout on the live storefront and confirmed the card
+ * fields render. Two rounds of that produced this list: the six shops behind `catalogue.ts`, each
+ * checked from an AWS datacentre IP, and the four in docs/merchant-shortlist.md, checked by a
+ * human from a residential connection. packages/closer/demo/links.ts holds the reachability
+ * targets the second group came from.
  *
  * Everything here is Shopify. That is not a coincidence: a Shopify storefront exposes a stable
  * `/search` and a per-product `.js` document, so a scout can read an exact price in cents rather
@@ -32,6 +34,74 @@ export interface VerifiedMerchant {
 }
 
 export const VERIFIED_MERCHANTS: VerifiedMerchant[] = [
+  /*
+   * The six below were verified the way that matters for this rail: each was confirmed to serve
+   * real content to an AWS datacentre IP — which is exactly what an AgentCore browser egresses
+   * from — and to reach a card form at checkout.pci.shopifyinc.com. They back `catalogue.ts`.
+   *
+   * They come first for that reason. The four after them were reached by a human from a
+   * residential connection, which says nothing about whether AWS egress gets through.
+   */
+  {
+    id: "sweelee",
+    host: "sweelee.com.sg",
+    name: "Swee Lee",
+    origin: "https://www.sweelee.com.sg",
+    sells: "musical instruments, accessories, cables, drumsticks and picks",
+    shippingMinor: 0,
+    probeSparingly: false,
+    note: "Verified from an AWS IP. Small accessories sit inside the S$5-30 card band.",
+  },
+  {
+    id: "cocomo",
+    host: "cocomo.sg",
+    name: "Cocomo",
+    origin: "https://www.cocomo.sg",
+    sells: "skincare, haircare and beauty",
+    shippingMinor: 0,
+    probeSparingly: false,
+    note: "Verified from an AWS IP. Prices bundles as variants — only the default is in band.",
+  },
+  {
+    id: "polypet",
+    host: "polypet.com.sg",
+    name: "Polypet",
+    origin: "https://polypet.com.sg",
+    sells: "pet food, treats and small pet supplies",
+    shippingMinor: 0,
+    probeSparingly: false,
+    note: "Verified from an AWS IP.",
+  },
+  {
+    id: "prismplus",
+    host: "prismplus.sg",
+    name: "PRISM+",
+    origin: "https://prismplus.sg",
+    sells: "consumer electronics, monitors and home appliance accessories",
+    shippingMinor: 0,
+    probeSparingly: false,
+    note: "Verified from an AWS IP. Many products carry 30+ variants; price the default only.",
+  },
+  {
+    id: "secretlab",
+    host: "secretlab.sg",
+    name: "Secretlab",
+    origin: "https://secretlab.sg",
+    sells: "desk and chair accessories; the chairs themselves are far above the card band",
+    shippingMinor: 0,
+    probeSparingly: false,
+    note: "Verified from an AWS IP. Only the small accessories are buyable on this rail.",
+  },
+  {
+    id: "compasia",
+    host: "compasia.sg",
+    name: "CompAsia",
+    origin: "https://compasia.sg",
+    sells: "refurbished phones and phone accessories",
+    shippingMinor: 0,
+    probeSparingly: false,
+    note: "Verified from an AWS IP. Accessories only; handsets exceed S$30.",
+  },
   {
     id: "wardah",
     host: "wardahbooks.com",

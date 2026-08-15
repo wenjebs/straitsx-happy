@@ -3,7 +3,7 @@ import { merchantById, merchantsForSlot, type VerifiedMerchant } from "../mercha
 import type { ScoutProvider } from "./agent.js";
 import type { AgentCoreBrowser, BrowserSession } from "./agentcoreBrowser.js";
 import { catalogueFallback } from "./fallbackShortlist.js";
-import { type ScoutBrain, type ScoutDecision, type ScoutPick, titleScore } from "./scoutBrain.js";
+import { relevance, type ScoutBrain, type ScoutDecision, type ScoutPick } from "./scoutBrain.js";
 import { openProduct, searchStore } from "./storefront.js";
 
 /**
@@ -342,9 +342,10 @@ function mergeDecisions(
   for (const decision of decisions) picks.push(decision.pick, ...decision.alternates);
   const unique = new Map<string, ScoutPick>();
   for (const pick of picks) if (!unique.has(pick.product.url)) unique.set(pick.product.url, pick);
-  const relevance = (pick: ScoutPick) => titleScore(pick.product.title, item);
+  const score = (pick: ScoutPick) =>
+    relevance(pick.product.title, item, merchantById(pick.product.merchantId)?.sells);
   const ranked = [...unique.values()].sort(
-    (a, b) => relevance(b) - relevance(a) || a.product.priceMinor - b.product.priceMinor,
+    (a, b) => score(b) - score(a) || a.product.priceMinor - b.product.priceMinor,
   );
   const [best, ...rest] = ranked;
   if (!best) return null;

@@ -96,10 +96,14 @@ export class ScriptedScoutBrain implements ScoutBrain {
       }
     }
 
+    const sells = new Map(merchants.map((merchant) => [merchant.id, merchant.sells]));
     const ranked = found
-      .map((entry) => ({ ...entry, relevance: titleScore(entry.candidate.title, item) }))
-      .filter((entry) => entry.relevance > 0)
-      .sort((a, b) => b.relevance - a.relevance || a.candidate.priceMinor - b.candidate.priceMinor)
+      .map((entry) => ({
+        ...entry,
+        score: relevance(entry.candidate.title, item, sells.get(entry.merchantId)),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score || a.candidate.priceMinor - b.candidate.priceMinor)
       .slice(0, 4);
 
     const opened: ProductDetail[] = [];
@@ -111,17 +115,17 @@ export class ScriptedScoutBrain implements ScoutBrain {
       if (detail) opened.push(detail);
     }
 
+    const scoreOf = (product: ProductDetail) =>
+      relevance(product.title, item, sells.get(product.merchantId));
     const affordable = opened
       .filter(
         (product) =>
           product.available &&
           product.priceMinor >= budget.minMinor &&
           product.priceMinor <= budget.maxMinor &&
-          titleScore(product.title, item) > 0,
+          scoreOf(product) > 0,
       )
-      .sort(
-        (a, b) => titleScore(b.title, item) - titleScore(a.title, item) || a.priceMinor - b.priceMinor,
-      );
+      .sort((a, b) => scoreOf(b) - scoreOf(a) || a.priceMinor - b.priceMinor);
 
     const [best, ...rest] = affordable;
     if (!best) return null;
@@ -348,24 +352,40 @@ function key(merchantId: string, handle: string): string {
   return `${merchantId}::${handle}`;
 }
 
-/**
- * Crude word overlap between a product title and what the shopper asked for.
- *
- * Only good enough to order candidates and to refuse the obviously-wrong ones. A zero here is the
- * guard that stops a scout looking for a notebook from shortlisting a bag of coffee simply because
- * coffee was the only thing in band.
- */
-export function titleScore(title: string, item: { name: string; spec: string }): number {
-  const wanted = new Set(
-    `${item.name} ${item.spec}`
+function words(text: string): Set<string> {
+  return new Set(
+    text
       .toLowerCase()
       .split(/[^a-z0-9]+/)
       .filter((word) => word.length > 2),
   );
-  const words = new Set(title.toLowerCase().split(/[^a-z0-9]+/));
+}
+
+function overlap(text: string, item: { name: string; spec: string }): number {
+  const wanted = words(`${item.name} ${item.spec}`);
   let hits = 0;
-  for (const word of words) if (wanted.has(word)) hits += 1;
+  for (const word of words(text)) if (wanted.has(word)) hits += 1;
   return hits;
+}
+
+/**
+ * How well a product answers the request.
+ *
+ * Title overlap alone is not enough, and the failure is not subtle: a roaster names its beans
+ * "Colombia Supremo", so a search for "filter coffee beans" scores it zero, while an electronics
+ * shop's "Vortex Filter Subscription" scores one on the word "filter" and wins. The shop is the
+ * missing signal — a coffee roaster sells coffee whether or not the word is on the bag.
+ *
+ * So the merchant's own description counts too, and the title is weighted above it. Zero means no
+ * connection to the request through either route, which is the guard that stops a scout looking
+ * for a notebook from shortlisting drumsticks because they were the only thing in band.
+ */
+export function relevance(
+  title: string,
+  item: { name: string; spec: string },
+  merchantSells?: string,
+): number {
+  return overlap(title, item) * 2 + (merchantSells ? overlap(merchantSells, item) : 0);
 }
 
 const PICK_SCHEMA = {

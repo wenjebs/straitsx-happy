@@ -122,14 +122,21 @@ export async function openProduct(
     throw new Error(`${merchant.host}/products/${handle} did not return product JSON`);
   }
 
-  // `price` is the default variant. Prefer the cheapest variant that is actually in stock — that is
-  // the one a scout can buy, and the one whose price has to fit inside the card bounds.
+  /*
+   * The DEFAULT variant's price, never the cheapest one.
+   *
+   * Shopify's `price` is the default variant — the one already selected when the Closer opens this
+   * page. Quoting any other variant means quoting a price the checkout will not charge: several of
+   * these shops sell bundles as variants ("(BUY 2+1 FREE) X" at S$36-103 against a S$12 default),
+   * and prismplus lists 34 variants where the cheapest is a S$0.70 accessory.
+   *
+   * So the rule is the same one the Closer follows: do not touch the variant selector, and price
+   * what it is already showing.
+   */
   const buyable = (detail.variants ?? []).filter(
     (variant) => variant.available && typeof variant.price === "number",
   );
-  const priceMinor = buyable.length
-    ? Math.min(...buyable.map((variant) => variant.price as number))
-    : (detail.price ?? 0);
+  const priceMinor = detail.price ?? 0;
 
   return {
     merchantId: merchant.id,

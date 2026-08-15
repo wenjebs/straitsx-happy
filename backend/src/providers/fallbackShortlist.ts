@@ -29,7 +29,18 @@ export function catalogueFallback(
   const text = [item.name, item.spec, item.category].filter(Boolean).join(" ");
   try {
     const matched = matchListing(text, options.used);
-    return { listing: matched.listing, reSearched: false, alternates: matched.alternates };
+    return {
+      // Say so on the card. The shortlist schema requires one pick per wishlist item, so an item
+      // the live scouts could not answer cannot simply be dropped — but a substitute presented as
+      // a search result is the "plausible and wrong" failure this codebase already learned to
+      // avoid. `why` is what the shopper reads before approving, so the substitution belongs there.
+      listing: {
+        ...matched.listing,
+        why: `No verified shop had a live match for "${item.name}". Closest product in the crawled catalogue — review before approving.`,
+      },
+      reSearched: false,
+      alternates: matched.alternates,
+    };
   } catch {
     // matchListing throws only on an empty catalogue. An item with no listing is a better
     // outcome than a crashed search.
