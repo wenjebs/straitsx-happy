@@ -50,8 +50,12 @@ describe("appendAudit redaction", () => {
         panel: "control",
         expansion: "none",
         japan: "region",
+        span: "1-2",
+        panda: "mascot",
+        japanese: "language",
         // a bare "number" with no card-ish word in front is an ordinary field
         orderNumber: "ORD-1",
+        phoneNumber: "+6591234567",
       },
     });
 
@@ -64,7 +68,39 @@ describe("appendAudit redaction", () => {
     expect(detail?.panel).toBe("control");
     expect(detail?.expansion).toBe("none");
     expect(detail?.japan).toBe("region");
+    expect(detail?.span).toBe("1-2");
+    expect(detail?.panda).toBe("mascot");
+    expect(detail?.japanese).toBe("language");
     expect(detail?.orderNumber).toBe("ORD-1");
+    expect(detail?.phoneNumber).toBe("+6591234567");
+  });
+
+  it("redacts separator-less SCREAMINGCASE compounds the tokenizer can't split", () => {
+    const db = openDb(":memory:");
+    appendAudit(db, {
+      purchaseId: "p4",
+      kind: "TEST",
+      detail: {
+        CARDNUMBER: "4111111111111111",
+        PRIVATEKEY: "0xsecret",
+        TXSIGNATURE: "0xsig",
+        CVVCODE: "123",
+        ACCOUNTNUMBER: "0011223344",
+        apiKey: "sk-live-abc123",
+        API_KEY: "sk-live-abc123",
+      },
+    });
+
+    const events = readAudit(db, "p4");
+    const detail = events[0]?.detail as Record<string, unknown> | undefined;
+
+    expect(detail?.CARDNUMBER).toBe("[redacted]");
+    expect(detail?.PRIVATEKEY).toBe("[redacted]");
+    expect(detail?.TXSIGNATURE).toBe("[redacted]");
+    expect(detail?.CVVCODE).toBe("[redacted]");
+    expect(detail?.ACCOUNTNUMBER).toBe("[redacted]");
+    expect(detail?.apiKey).toBe("[redacted]");
+    expect(detail?.API_KEY).toBe("[redacted]");
   });
 
   it("redacts forbidden keys nested inside the detail object", () => {

@@ -25,7 +25,7 @@ const NUMBER_QUALIFIERS = new Set(["card", "account", "pan"]);
 // Whole-token match, not substring — a substring test would redact "companyName",
 // "panel", "japan", "span", "expansion" (all contain "pan" or "cvc"-adjacent runs
 // as bare text) and silently destroy ordinary audit evidence.
-const isForbiddenKey = (key: string): boolean => {
+const isTokenForbidden = (key: string): boolean => {
   const tokens = tokenize(key);
   if (tokens.some((t) => t === "pan" || t === "cvv" || t === "cvc" || t === "signature")) {
     return true;
@@ -35,6 +35,32 @@ const isForbiddenKey = (key: string): boolean => {
     (t, i) => t === "number" && i > 0 && NUMBER_QUALIFIERS.has(tokens[i - 1] ?? ""),
   );
 };
+
+// Belt-and-suspenders for separator-less, case-transition-less compounds the
+// tokenizer can't split — "CARDNUMBER", "PRIVATEKEY", "TXSIGNATURE" have neither a
+// separator nor a case change, so the tokenizer's `[A-Z]+` fallback swallows the
+// whole run as one token and the token rules above miss it. Each entry here is
+// long enough that no ordinary English field name contains it as a substring —
+// that's why bare "pan" is deliberately absent: the token rule already redacts a
+// standalone "pan", and adding it here would re-catch "japan"/"expansion".
+const HIGH_SIGNAL_SUBSTRINGS = [
+  "cvv",
+  "cvc",
+  "signature",
+  "privatekey",
+  "cardnumber",
+  "accountnumber",
+  "pannumber",
+  "apikey",
+];
+
+const hasHighSignalSubstring = (key: string): boolean => {
+  const normalized = key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  return HIGH_SIGNAL_SUBSTRINGS.some((s) => normalized.includes(s));
+};
+
+const isForbiddenKey = (key: string): boolean =>
+  isTokenForbidden(key) || hasHighSignalSubstring(key);
 
 export function appendAudit(
   db: Db,
