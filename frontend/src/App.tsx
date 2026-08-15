@@ -11,6 +11,7 @@ import type { ActivityStage } from "./lib/Api";
 import { isLive } from "./lib/Api";
 import { ActivityHistoryScreen } from "./screens/ActivityHistoryScreen";
 import { ArchiveScreen } from "./screens/ArchiveScreen";
+import { BrowserTestScreen } from "./screens/BrowserTestScreen";
 import { ChatScreen } from "./screens/ChatScreen";
 import { ExecutionScreen } from "./screens/ExecutionScreen";
 import { MandateScreen } from "./screens/MandateScreen";
@@ -36,6 +37,7 @@ const SCREEN_TITLE = {
   mandate: "Mandate",
   settings: "Settings",
   profile: "Profile",
+  browsertest: "Browser test",
 } as const;
 
 export function App() {
@@ -163,6 +165,7 @@ export function App() {
               />
             )}
             {state.screen === "profile" && <ProfileScreen profile={state.profile} />}
+            {state.screen === "browsertest" && <BrowserTestScreen />}
           </section>
 
           {onPurchase && state.focused === null && (

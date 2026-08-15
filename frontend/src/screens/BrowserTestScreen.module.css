@@ -1,0 +1,140 @@
+.screen {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 30px 40px;
+}
+
+.warning {
+  max-width: 900px;
+  margin: 0 auto 20px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.controls,
+.keyboard {
+  display: flex;
+  gap: 8px;
+  max-width: 900px;
+  margin: 0 auto 14px;
+}
+
+.url {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.controls button,
+.keyboard button {
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.controls button:disabled,
+.keyboard button:disabled {
+  color: var(--text-disabled);
+  background: var(--fill-inactive);
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--text-primary) !important;
+  color: var(--surface) !important;
+  border-color: var(--text-primary) !important;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+}
+
+.danger {
+  color: #a4262c !important;
+}
+
+.meta {
+  display: flex;
+  gap: 26px;
+  max-width: 900px;
+  margin: 0 auto 14px;
+  font-size: 12px;
+  /* The url column is the one that grows; session id and live view are fixed width. */
+  align-items: start;
+}
+
+.meta > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.meta dt {
+  color: var(--text-quaternary);
+  margin-bottom: 2px;
+}
+
+.meta dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error {
+  max-width: 900px;
+  margin: 0 auto 14px;
+  padding: 8px 10px;
+  border: 1px solid #f0c9cb;
+  border-radius: var(--r-control);
+  background: #fdf5f5;
+  color: #a4262c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.viewport {
+  max-width: 900px;
+  margin: 0 auto 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-tile);
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1456 / 819;
+  color: var(--text-quaternary);
+  font-size: 13px;
+}
