@@ -117,11 +117,13 @@ export async function revokeMandate(reason: string) {
 
 export async function evaluate(q: Quote) {
   const { db, cfg, wallet } = get();
+  await wallet.ready();
   return L.evaluateQuote(db, cfg, wallet.view(), q);
 }
 
 export async function reserve(q: Quote) {
   const { db, cfg, wallet } = get();
+  await wallet.ready();
   return shape(await L.reserveQuote(db, cfg, wallet.view(), q))!;
 }
 
@@ -131,6 +133,7 @@ export async function approve(purchaseId: string) {
 
 export async function issueCard(purchaseId: string, finalTotalCents: Cents) {
   const { db, cfg, issuer, wallet } = get();
+  await wallet.ready();
   const r = await issueCardFor({ db, cfg, issuer, wallet }, purchaseId, finalTotalCents);
   return { last4: r.last4, expiresAt: r.expiresAt, settlementTx: r.settlementTx };
 }
@@ -179,6 +182,7 @@ export async function getAuditLog(purchaseId: string) {
 
 export async function getWallet() {
   const { cfg, db, wallet } = get();
+  await wallet.ready();
   const v = wallet.view();
   const m = L.getMandateRow(db);
   const t = L.totals(db, m?.id ?? null);
@@ -205,6 +209,7 @@ export function noteRailStatus(status: "OK" | "RATE_LIMITED" | "ERROR") {
 /** Never touches the rail — reports what real work last observed. */
 export async function health() {
   const { cfg, wallet } = get();
+  await wallet.ready();
   const v = wallet.view();
   const blockers: string[] = [];
   if (cfg.issuer === "straitsx" && v.balanceCents <= 0) blockers.push("wallet has no XSGD");

@@ -15,7 +15,9 @@ function sweepCardResponseFiles(): string[] {
   } catch {
     return [];
   }
-  for (const f of files) rmSync(`${CARD_RESPONSE_DIR}/${f}`, { force: true });
+  // recursive: anything a human dropped in here (a rendered copy of a card, say) is a
+  // directory, and rmSync without it throws EISDIR and fails every test in this file.
+  for (const f of files) rmSync(`${CARD_RESPONSE_DIR}/${f}`, { force: true, recursive: true });
   return files;
 }
 

@@ -37,3 +37,29 @@ describe("makeWallet", () => {
     expect(wallet.account).toBeNull();
   });
 });
+
+describe("cold start", () => {
+  it("ready() resolves even when the chain read fails, leaving the cache empty", async () => {
+    const w = makeWallet({
+      issuer: "straitsx",
+      spendPrivateKey: `0x${"11".repeat(32)}`,
+      rpcUrl: "http://127.0.0.1:1", // nothing listening: the read will fail
+      xsgdAddress: "0xd769410dc8772695a7f55a304d2125320a65c2a5",
+    } as never);
+    await w.ready(); // must not throw
+    expect(w.view().ageMs).toBe(Number.MAX_SAFE_INTEGER); // stale → decisions fail closed
+    w.stop();
+  }, 30_000);
+
+  it("ready() is a no-op in mock mode", async () => {
+    const w = makeWallet({
+      issuer: "mock",
+      spendPrivateKey: `0x${"11".repeat(32)}`,
+      rpcUrl: "http://127.0.0.1:1",
+      xsgdAddress: "0xd769410dc8772695a7f55a304d2125320a65c2a5",
+    } as never);
+    await w.ready();
+    expect(w.view().balanceCents).toBe(Number.MAX_SAFE_INTEGER);
+    w.stop();
+  });
+});

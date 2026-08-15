@@ -1,6 +1,12 @@
 # Happy — AI Shopping Concierge
 ### Product & System Spec — Draft v0.3
 
+> **This is Ranen's draft — treat it as direction, not as a contract.** Much of it is
+> aspirational product thinking rather than agreed scope, and several parts describe things
+> nobody has built or committed to. The one section that is authoritative is §12, which
+> documents the payment library as it actually shipped and is verified against the code.
+> Where anything else here disagrees with the code, the code wins.
+
 Context: StraitX/StraitsX hackathon. AI agents research and purchase real items on a user's
 behalf, paying with a disposable, single-use virtual card funded in XSGD (StraitsX's
 SGD-pegged stablecoin).

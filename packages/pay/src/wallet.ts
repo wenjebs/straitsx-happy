@@ -18,6 +18,10 @@ export function makeWallet(cfg: Config) {
   const client = createPublicClient({ transport: http(cfg.rpcUrl) });
   let cache: { cents: Cents; at: number } = { cents: 0, at: 0 };
   let timer: NodeJS.Timeout | null = null;
+  // Resolves once the first balance read has been attempted. Without this, the first decision
+  // after boot sees an empty cache and denies with CHAIN_STALE — safe, but it looks like an
+  // inexplicable refusal. Callers await ready() before deciding.
+  let firstLoad: Promise<void> | null = null;
 
   async function refresh(): Promise<Cents> {
     if (!account) return 0;
@@ -52,9 +56,25 @@ export function makeWallet(cfg: Config) {
         args: [account.address, nonce],
       })) as boolean;
     },
+    /**
+     * Awaits the first balance read. Resolves (rather than rejects) if that read fails — the
+     * cache then stays empty and the decision layer denies with CHAIN_STALE, which is the
+     * correct fail-closed outcome. In mock mode there is no account and this is a no-op.
+     */
+    async ready(): Promise<void> {
+      if (!account) return;
+      if (!firstLoad)
+        firstLoad = refresh()
+          .then(() => undefined)
+          .catch(() => undefined);
+      await firstLoad;
+    },
     start() {
       if (timer) return;
-      void refresh().catch(() => {});
+      if (!firstLoad)
+        firstLoad = refresh()
+          .then(() => undefined)
+          .catch(() => undefined);
       timer = setInterval(() => void refresh().catch(() => {}), 5_000);
       timer.unref?.(); // never hold a test worker or CLI process open
     },
