@@ -2,7 +2,13 @@
 
 Spending limits for AI agents. An agent gets a single-use Visa card worth exactly
 one purchase, minted at checkout time from a user's XSGD, and only if the purchase
-passes a rule the user signed.
+passes a spending rule the user set in advance.
+
+Two things enforce the rule: the service checks every purchase against it, and
+the card is minted at the exact amount approved, so the agent cannot overspend a
+card it holds. Enforcing the cap on-chain as well, via a smart account whose
+session key the network itself constrains, is deferred — see the spec's
+out-of-scope section.
 
 Built for the AgentiX Playground. Runs entirely offline against a mock issuer by
 default.
