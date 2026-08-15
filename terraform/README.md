@@ -7,7 +7,13 @@ Terraform provisions:
 - public ALB reachable only from the AWS-managed CloudFront origin prefix list;
 - one ECS Fargate backend task with CloudWatch logs and outbound internet access;
 - DynamoDB on-demand single table with point-in-time recovery;
+- Cognito User Pool with verified-email signup and a public web client;
 - ECR repository and a Secrets Manager secret.
+
+When `funding_mode="chain"`, the backend also verifies inbound XSGD transfers through the
+configured public Avalanche RPC and stores globally idempotent deposit records in the existing
+DynamoDB table. `happy_wallet_address` is public configuration; the shared wallet's signing key
+is not required for Stage 1 and must remain in the payment service used by Stage 2.
 
 Fargate is used instead of API Gateway/Lambda because Happy keeps SSE streams open and calls
 long-running browser/payment services. CloudFront waits up to 60 seconds between origin packets;
@@ -35,7 +41,11 @@ terraform apply
 The first apply leaves `deploy_backend=false`. It creates the ECR repository and secret before an
 image or secret value is needed.
 
-Populate the secret with all six JSON keys. Use real random values—never commit this file:
+The deployed backend always uses Cognito authentication. Terraform outputs
+`cognito_user_pool_id` and `cognito_web_client_id`; ECS receives both automatically. Local
+development uses `AUTH_MODE=local` and does not require these AWS resources.
+
+Populate the secret with all seven JSON keys. Use real random values—never commit this file:
 
 ```json
 {
@@ -44,7 +54,8 @@ Populate the secret with all six JSON keys. Use real random values—never commi
   "AGENT_CALLBACK_TOKEN": "replace-with-a-long-random-value",
   "CARD_API_TOKEN": "replace-with-straitsx-card-api-token",
   "PURCHASE_AGENT_API_TOKEN": "replace-with-closer-api-token",
-  "PURCHASE_CALLBACK_TOKEN": "replace-with-a-second-long-random-value"
+  "PURCHASE_CALLBACK_TOKEN": "replace-with-a-second-long-random-value",
+  "WALLET_AUTH_SECRET": "replace-with-a-third-long-random-value"
 }
 ```
 

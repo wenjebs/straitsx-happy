@@ -91,6 +91,9 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "FRONTEND_ORIGIN", value = "https://${aws_cloudfront_distribution.app.domain_name}" },
       { name = "PUBLIC_BASE_URL", value = "https://${aws_cloudfront_distribution.app.domain_name}" },
+      { name = "AUTH_MODE", value = "cognito" },
+      { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.happy.id },
+      { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.happy_web.id },
       { name = "PLANNER_MODE", value = "openai" },
       { name = "OPENAI_MODEL", value = var.openai_model },
       { name = "OPENAI_BASE_URL", value = "https://api.openai.com/v1" },
@@ -100,6 +103,15 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "CARD_API_BASE_URL", value = var.card_api_base_url },
       { name = "PURCHASE_AGENT_MODE", value = var.purchase_agent_api_base_url != "" ? "remote" : "disabled" },
       { name = "PURCHASE_AGENT_API_BASE_URL", value = var.purchase_agent_api_base_url },
+      { name = "FUNDING_MODE", value = var.funding_mode },
+      { name = "HAPPY_WALLET_ADDRESS", value = var.happy_wallet_address },
+      { name = "CHAIN_ID", value = tostring(var.funding_chain_id) },
+      { name = "RPC_URL", value = var.funding_rpc_url },
+      { name = "XSGD_ADDRESS", value = var.xsgd_address },
+      { name = "XSGD_DECIMALS", value = "6" },
+      { name = "FUNDING_NETWORK_NAME", value = var.funding_network_name },
+      { name = "FUNDING_EXPLORER_URL", value = var.funding_explorer_url },
+      { name = "DEPOSIT_CONFIRMATIONS", value = tostring(var.deposit_confirmations) },
       { name = "PAYMENT_MIN_MINOR", value = tostring(var.payment_min_minor) },
       { name = "PAYMENT_MAX_MINOR", value = tostring(var.payment_max_minor) },
       { name = "PAYMENT_ATTEMPTS_PER_LISTING", value = tostring(var.payment_attempts_per_listing) }
@@ -128,6 +140,10 @@ resource "aws_ecs_task_definition" "backend" {
       {
         name      = "PURCHASE_CALLBACK_TOKEN"
         valueFrom = "${aws_secretsmanager_secret.backend.arn}:PURCHASE_CALLBACK_TOKEN::"
+      },
+      {
+        name      = "WALLET_AUTH_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.backend.arn}:WALLET_AUTH_SECRET::"
       }
     ]
     logConfiguration = {

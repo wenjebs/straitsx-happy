@@ -205,6 +205,54 @@ export interface Wallet {
   receipt?: string;
 }
 
+export type WalletDepositStatus = "pending" | "confirmed" | "failed";
+
+export interface WalletDeposit {
+  id: string;
+  txHash: string;
+  sourceAddress: string;
+  destinationAddress: string;
+  tokenAddress: string;
+  chainId: number;
+  status: WalletDepositStatus;
+  amountAtomic: string | null;
+  amountMinor: number | null;
+  confirmations: number;
+  requiredConfirmations: number;
+  blockNumber?: string;
+  failureReason?: string;
+  explorerUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string;
+}
+
+export type FundingConfiguration =
+  | { enabled: false; mode: "disabled"; message: string }
+  | {
+      enabled: true;
+      mode: "chain";
+      walletAddress: string;
+      tokenAddress: string;
+      tokenSymbol: "XSGD";
+      tokenDecimals: number;
+      chainId: number;
+      networkName: string;
+      rpcUrl: string;
+      explorerUrl: string;
+      requiredConfirmations: number;
+    };
+
+export interface WalletFundingSnapshot {
+  configuration: FundingConfiguration;
+  deposits: WalletDeposit[];
+}
+
+export interface WalletDepositResult {
+  deposit: WalletDeposit;
+  wallet: Wallet;
+}
+
 export interface Mandate {
   autoApprove: boolean;
   /** Whole SGD, matching the slider units. */
@@ -226,6 +274,27 @@ export interface Profile {
   initials: string;
   memberSince: string;
   rows: { k: string; v: string }[];
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  initials: string;
+  createdAt: string;
+}
+
+export interface AuthSession {
+  user: AuthUser;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: string;
+}
+
+export interface SignupResult {
+  confirmationRequired: boolean;
+  email: string;
+  session?: AuthSession;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,18 +341,22 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Auth seam. No credentials are sent today; when the backend grows auth, this
- * is the only place that changes.
- *
- * Note EventSource cannot send custom headers, so any scheme added here must
- * also work for the SSE stream — a cookie, or a token in the query string.
- */
+const AUTH_SESSION_TOKEN = "happy.auth.session";
+const AUTH_REFRESH_TOKEN = "happy.auth.refresh";
+const AUTH_CHANGED_EVENT = "happy:auth-changed";
+const WALLET_SESSION_TOKEN = "happy.wallet.session";
+const WALLET_SESSION_ADDRESS = "happy.wallet.address";
+
 function authHeaders(): Record<string, string> {
-  return {};
+  const authToken = authSessionToken();
+  const walletToken = walletSessionToken();
+  return {
+    ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
+    ...(walletToken ? { "x-happy-wallet-session": walletToken } : {}),
+  };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, retryAuth = true): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -294,6 +367,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 401) {
+      if (/wallet|deposit/i.test(body)) clearWalletSession();
+      else if (retryAuth && !path.startsWith("/v1/auth/") && (await tryRefreshAuth())) {
+        return request<T>(path, init, false);
+      } else clearAuthSession();
+    }
     throw new ApiError(res.status, body || `${res.status} ${res.statusText}`);
   }
   if (res.status === 204) return undefined as T;
@@ -308,6 +387,95 @@ const post = <T>(path: string, body?: unknown) =>
   });
 const patch = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+
+function authSessionToken(): string | null {
+  return typeof window === "undefined" ? null : window.localStorage.getItem(AUTH_SESSION_TOKEN);
+}
+
+async function tryRefreshAuth(): Promise<boolean> {
+  if (typeof window === "undefined" || !isLive()) return false;
+  const refreshToken = window.localStorage.getItem(AUTH_REFRESH_TOKEN);
+  if (!refreshToken) return false;
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!response.ok) return false;
+    storeAuthSession((await response.json()) as AuthSession);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hasAuthSession(): boolean {
+  return authSessionToken() !== null;
+}
+
+export function storeAuthSession(session: AuthSession): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(AUTH_SESSION_TOKEN, session.accessToken);
+  if (session.refreshToken) {
+    window.localStorage.setItem(AUTH_REFRESH_TOKEN, session.refreshToken);
+  }
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
+export function clearAuthSession(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(AUTH_SESSION_TOKEN);
+  window.localStorage.removeItem(AUTH_REFRESH_TOKEN);
+  clearWalletSession();
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
+export function onAuthChanged(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener(AUTH_CHANGED_EVENT, listener);
+  return () => window.removeEventListener(AUTH_CHANGED_EVENT, listener);
+}
+
+export async function signup(name: string, email: string, password: string): Promise<SignupResult> {
+  if (!isLive()) throw new Error("Start the backend to create an account.");
+  const result = await post<SignupResult>("/v1/auth/signup", { name, email, password });
+  if (result.session) storeAuthSession(result.session);
+  return result;
+}
+
+export async function confirmSignup(email: string, code: string): Promise<void> {
+  if (!isLive()) return;
+  await post("/v1/auth/confirm", { email, code });
+}
+
+export async function login(email: string, password: string): Promise<AuthSession> {
+  if (!isLive()) throw new Error("Start the backend to sign in.");
+  const session = await post<AuthSession>("/v1/auth/login", { email, password });
+  storeAuthSession(session);
+  return session;
+}
+
+export function getCurrentUser(): Promise<AuthUser> {
+  if (!isLive()) {
+    return Promise.resolve({
+      id: "mock-user",
+      email: "demo@happy.local",
+      name: "Happy Demo",
+      initials: "HD",
+      createdAt: new Date().toISOString(),
+    });
+  }
+  return get("/v1/auth/me");
+}
+
+export async function logout(): Promise<void> {
+  try {
+    if (isLive() && hasAuthSession()) await post("/v1/auth/logout");
+  } finally {
+    clearAuthSession();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Activities
@@ -415,8 +583,6 @@ export function subscribeToActivity(
     return mockBackend.subscribe(id, onEvent);
   }
 
-  onState?.("connecting");
-  const source = new EventSource(`${API_BASE_URL}/v1/activities/${id}/events`);
   const types: ActivityEvent["type"][] = [
     "activity.snapshot",
     "activity.stage",
@@ -430,30 +596,81 @@ export function subscribeToActivity(
     "wallet.updated",
   ];
 
-  const handler = (type: ActivityEvent["type"]) => (e: MessageEvent<string>) => {
+  let closed = false;
+  let controller: AbortController | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const connect = async () => {
+    if (closed) return;
+    onState?.("connecting");
+    controller = new AbortController();
     try {
-      onEvent({ type, ...JSON.parse(e.data) } as ActivityEvent);
-    } catch {
-      /* A malformed frame must not tear down a live purchase stream. */
+      const response = await fetch(`${API_BASE_URL}/v1/activities/${id}/events`, {
+        headers: authHeaders(),
+        signal: controller.signal,
+      });
+      if (response.status === 401) {
+        if (await tryRefreshAuth()) {
+          await connect();
+          return;
+        }
+        clearAuthSession();
+        throw new ApiError(401, "Login session expired.");
+      }
+      if (!response.ok || !response.body) {
+        throw new ApiError(response.status, `Activity stream failed (${response.status}).`);
+      }
+      onState?.("open");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!closed) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          dispatchSseFrame(frame, types, onEvent);
+          boundary = buffer.indexOf("\n\n");
+        }
+      }
+      if (!closed) throw new Error("Activity stream closed.");
+    } catch (error) {
+      if (closed || (error instanceof DOMException && error.name === "AbortError")) return;
+      onState?.("connecting");
+      reconnectTimer = setTimeout(() => void connect(), 1500);
     }
   };
 
-  const handlers = types.map((type) => {
-    const fn = handler(type);
-    source.addEventListener(type, fn as EventListener);
-    return [type, fn] as const;
-  });
-
-  source.onopen = () => onState?.("open");
-  source.onerror = () =>
-    onState?.(source.readyState === EventSource.CLOSED ? "error" : "connecting");
-
+  void connect();
   return {
     close: () => {
-      for (const [type, fn] of handlers) source.removeEventListener(type, fn as EventListener);
-      source.close();
+      closed = true;
+      controller?.abort();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
     },
   };
+}
+
+function dispatchSseFrame(
+  frame: string,
+  types: ActivityEvent["type"][],
+  onEvent: (event: ActivityEvent) => void,
+): void {
+  let type = "";
+  const data: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) type = line.slice("event:".length).trim();
+    if (line.startsWith("data:")) data.push(line.slice("data:".length).trimStart());
+  }
+  if (!types.includes(type as ActivityEvent["type"]) || data.length === 0) return;
+  try {
+    onEvent({ type, ...JSON.parse(data.join("\n")) } as ActivityEvent);
+  } catch {
+    /* A malformed frame must not tear down a live purchase stream. */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -464,10 +681,75 @@ export function getWallet(): Promise<Wallet> {
   return isLive() ? get("/v1/wallet") : mockBackend.getWallet();
 }
 
-export function topUpWallet(amountMinor: number): Promise<Wallet> {
+export interface WalletAuthChallenge {
+  challengeToken: string;
+  message: string;
+  expiresAt: string;
+}
+
+export interface WalletAuthSession {
+  sessionToken: string;
+  address: string;
+  expiresAt: string;
+}
+
+export function createWalletAuthChallenge(address: string): Promise<WalletAuthChallenge> {
+  if (!isLive()) throw new Error("Start the backend to authorize a funding wallet.");
+  return post("/v1/wallet/auth/challenge", { address });
+}
+
+export async function verifyWalletAuth(
+  challengeToken: string,
+  signature: string,
+): Promise<WalletAuthSession> {
+  if (!isLive()) throw new Error("Start the backend to authorize a funding wallet.");
+  const session = await post<WalletAuthSession>("/v1/wallet/auth/verify", {
+    challengeToken,
+    signature,
+  });
+  window.localStorage.setItem(WALLET_SESSION_TOKEN, session.sessionToken);
+  window.localStorage.setItem(WALLET_SESSION_ADDRESS, session.address.toLowerCase());
+  return session;
+}
+
+export function getWalletSessionAddress(): string | null {
+  return typeof window === "undefined" ? null : window.localStorage.getItem(WALLET_SESSION_ADDRESS);
+}
+
+function walletSessionToken(): string | null {
+  return typeof window === "undefined" ? null : window.localStorage.getItem(WALLET_SESSION_TOKEN);
+}
+
+export function clearWalletSession(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(WALLET_SESSION_TOKEN);
+  window.localStorage.removeItem(WALLET_SESSION_ADDRESS);
+}
+
+export function getWalletFunding(): Promise<WalletFundingSnapshot> {
   return isLive()
-    ? post("/v1/wallet/topup", { amountMinor })
-    : mockBackend.topUpWallet(amountMinor);
+    ? get("/v1/wallet/funding")
+    : Promise.resolve({
+        configuration: {
+          enabled: false,
+          mode: "disabled",
+          message: "Start the backend to make a real XSGD deposit.",
+        },
+        deposits: [],
+      });
+}
+
+export function registerWalletDeposit(
+  txHash: string,
+  sourceAddress: string,
+): Promise<WalletDepositResult> {
+  if (!isLive()) throw new Error("Start the backend to register a real XSGD deposit.");
+  return post("/v1/wallet/deposits", { txHash, sourceAddress });
+}
+
+export function refreshWalletDeposit(txHash: string): Promise<WalletDepositResult> {
+  if (!isLive()) throw new Error("Start the backend to verify a real XSGD deposit.");
+  return get(`/v1/wallet/deposits/${encodeURIComponent(txHash)}`);
 }
 
 export function getMandate(): Promise<Mandate> {

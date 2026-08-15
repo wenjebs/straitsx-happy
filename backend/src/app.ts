@@ -1,11 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
 import type { Config } from "./config.js";
-import { type ActivityEvent, DEFAULT_USER_ID, formatMinor, newId } from "./domain.js";
+import type { ActivityEvent, Profile } from "./domain.js";
 import { asMessage, HttpError } from "./errors.js";
 import type { EventHub } from "./events.js";
 import type { PlannerProvider, ScoutProvider } from "./providers/agent.js";
@@ -16,15 +16,24 @@ import {
   AddWishlistItemBody,
   AgentCallbackEvent,
   ChooseOptionBody,
+  ConfirmSignupBody,
   CreateActivityBody,
+  LoginBody,
   MandatePatch,
   PurchaseAgentCallbackEvent,
   PurchaseBody,
+  RefreshSessionBody,
   SettingsPatch,
-  TopUpBody,
+  SignupBody,
+  WalletAuthChallengeBody,
+  WalletAuthVerifyBody,
+  WalletDepositBody,
 } from "./schemas.js";
 import type { ActivityService } from "./services/activities.js";
+import type { AuthService, AuthUser } from "./services/auth.js";
 import type { PurchaseService } from "./services/purchases.js";
+import type { WalletAuthService } from "./services/walletAuth.js";
+import type { WalletFundingService } from "./services/walletFunding.js";
 
 export interface AppDependencies {
   config: Config;
@@ -36,17 +45,27 @@ export interface AppDependencies {
   purchaseAgents: PurchaseAgentProvider;
   activities: ActivityService;
   purchases: PurchaseService;
+  funding: WalletFundingService;
+  walletAuth: WalletAuthService;
+  auth: AuthService;
 }
 
-export function createApp(deps: AppDependencies): Hono {
-  const app = new Hono();
+type AppBindings = { Variables: { user: AuthUser } };
+
+export function createApp(deps: AppDependencies): Hono<AppBindings> {
+  const app = new Hono<AppBindings>();
 
   app.use(
     "*",
     cors({
       origin: deps.config.FRONTEND_ORIGIN,
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["content-type", "authorization", "x-happy-callback-token"],
+      allowHeaders: [
+        "content-type",
+        "authorization",
+        "x-happy-callback-token",
+        "x-happy-wallet-session",
+      ],
       maxAge: 86_400,
     }),
   );
@@ -59,11 +78,14 @@ export function createApp(deps: AppDependencies): Hono {
       scoutProvider: deps.scouts.mode,
       cardProvider: deps.cards.mode,
       purchaseAgentProvider: deps.purchaseAgents.mode,
+      fundingProvider: deps.config.FUNDING_MODE,
+      authProvider: deps.auth.mode,
       blockers: [
         ...(deps.planner.mode === "disabled" ? ["PLANNER_NOT_CONFIGURED"] : []),
         ...(deps.scouts.mode === "disabled" ? ["SCOUT_API_NOT_CONFIGURED"] : []),
         ...(deps.cards.mode === "disabled" ? ["CARD_API_NOT_CONFIGURED"] : []),
         ...(deps.purchaseAgents.mode === "disabled" ? ["PURCHASE_AGENT_API_NOT_CONFIGURED"] : []),
+        ...(deps.config.FUNDING_MODE === "disabled" ? ["XSGD_FUNDING_NOT_CONFIGURED"] : []),
       ],
       warnings: [
         ...(deps.planner.mode === "local" ? ["LOCAL_PLANNER_FAILSAFE"] : []),
@@ -74,7 +96,48 @@ export function createApp(deps: AppDependencies): Hono {
     }),
   );
 
-  app.get("/v1/activities", async (c) => c.json(await deps.activities.list()));
+  app.post("/v1/auth/signup", async (c) => {
+    const body = await parseBody(c.req.raw, SignupBody);
+    return c.json(await deps.auth.signup(body.name, body.email, body.password), 201);
+  });
+  app.post("/v1/auth/confirm", async (c) => {
+    const body = await parseBody(c.req.raw, ConfirmSignupBody);
+    await deps.auth.confirmSignup(body.email, body.code);
+    return c.body(null, 204);
+  });
+  app.post("/v1/auth/login", async (c) => {
+    const body = await parseBody(c.req.raw, LoginBody);
+    return c.json(await deps.auth.login(body.email, body.password));
+  });
+  app.post("/v1/auth/refresh", async (c) => {
+    const body = await parseBody(c.req.raw, RefreshSessionBody);
+    return c.json(await deps.auth.refresh(body.refreshToken));
+  });
+
+  app.use("/v1/*", async (c, next) => {
+    if (c.req.path.startsWith("/v1/integrations/") || c.req.path.startsWith("/v1/dev/")) {
+      await next();
+      return;
+    }
+    c.set("user", await deps.auth.authenticate(c.req.header("authorization")));
+    await next();
+  });
+
+  app.get("/v1/auth/me", (c) => c.json(c.get("user")));
+  app.post("/v1/auth/logout", (c) => c.body(null, 204));
+
+  const assertOwnedActivity: MiddlewareHandler<AppBindings> = async (c, next) => {
+    const id = c.req.param("id");
+    if (!id) throw new HttpError(404, "Activity not found.");
+    const activity = await deps.repository.getActivity(id);
+    const user = c.get("user");
+    if (!activity || activity.userId !== user.id) throw new HttpError(404, "Activity not found.");
+    await next();
+  };
+  app.use("/v1/activities/:id", assertOwnedActivity);
+  app.use("/v1/activities/:id/*", assertOwnedActivity);
+
+  app.get("/v1/activities", async (c) => c.json(await deps.activities.list(c.get("user").id)));
   app.get("/v1/activities/:id", async (c) => c.json(await deps.activities.get(c.req.param("id"))));
   app.get("/v1/activities/:id/checkpoints", async (c) =>
     c.json(await deps.activities.history(c.req.param("id"))),
@@ -82,7 +145,7 @@ export function createApp(deps: AppDependencies): Hono {
 
   app.post("/v1/activities", async (c) => {
     const body = await parseBody(c.req.raw, CreateActivityBody);
-    return c.json(await deps.activities.create(body.goal), 201);
+    return c.json(await deps.activities.create(body.goal, c.get("user").id), 201);
   });
 
   app.post("/v1/activities/:id/wishlist/items", async (c) => {
@@ -222,46 +285,56 @@ export function createApp(deps: AppDependencies): Hono {
     });
   });
 
-  app.get("/v1/wallet", async (c) => c.json(await deps.repository.getWallet(DEFAULT_USER_ID)));
-  app.post("/v1/wallet/topup", async (c) => {
-    const body = await parseBody(c.req.raw, TopUpBody);
-    if (deps.cards.mode === "disabled") {
-      throw new HttpError(
-        503,
-        "Wallet top-up is unavailable until the card provider is configured.",
-      );
+  app.post("/v1/wallet/auth/challenge", async (c) => {
+    const body = await parseBody(c.req.raw, WalletAuthChallengeBody);
+    return c.json(deps.walletAuth.challenge(c.get("user").id, body.address), 201);
+  });
+  app.post("/v1/wallet/auth/verify", async (c) => {
+    const body = await parseBody(c.req.raw, WalletAuthVerifyBody);
+    return c.json(
+      await deps.walletAuth.verify(c.get("user").id, body.challengeToken, body.signature),
+      201,
+    );
+  });
+  app.get("/v1/wallet", async (c) => {
+    return c.json(await deps.funding.wallet(c.get("user").id));
+  });
+  app.get("/v1/wallet/funding", async (c) => {
+    return c.json(await deps.funding.snapshot(c.get("user").id));
+  });
+  app.post("/v1/wallet/deposits", async (c) => {
+    const identity = deps.walletAuth.identity(c.req.header("x-happy-wallet-session"), true);
+    if (!identity) throw new HttpError(401, "Connect and authorize your wallet first.");
+    if (identity.userId !== c.get("user").id) {
+      throw new HttpError(403, "This wallet is authorized for a different Happy account.");
     }
-    if (deps.cards.mode === "local") {
-      const settings = await deps.repository.getSettings(DEFAULT_USER_ID);
-      if (!settings.sandbox) {
-        throw new HttpError(409, "Local wallet top-up requires Sandbox mode.");
-      }
+    const body = await parseBody(c.req.raw, WalletDepositBody);
+    if (body.sourceAddress.toLowerCase() !== identity.address) {
+      throw new HttpError(403, "The deposit source must match the authorized wallet.");
     }
-    const idempotencyKey = newId("topup");
-    const result = await deps.cards.topUp({
-      userId: DEFAULT_USER_ID,
-      amountMinor: body.amountMinor,
-      idempotencyKey,
-    });
-    const wallet = await deps.repository.getWallet(DEFAULT_USER_ID);
-    wallet.balanceMinor += body.amountMinor;
-    wallet.receipt = `+${formatMinor(body.amountMinor).replace("S$", "")} XSGD received · tx ${result.transactionId} · ${result.confirmations} confirmations`;
-    wallet.transactions.unshift({
-      id: newId("txn"),
-      ts: "now",
-      label: "XSGD wallet top-up",
-      ref: result.transactionId,
-      amount: `+${formatMinor(body.amountMinor)}`,
-      debit: false,
-    });
-    await deps.repository.putWallet(DEFAULT_USER_ID, wallet);
-    return c.json(wallet);
+    const result = await deps.funding.submit(identity.userId, body.txHash, body.sourceAddress);
+    return c.json(result, result.deposit.status === "confirmed" ? 201 : 202);
+  });
+  app.get("/v1/wallet/deposits/:txHash", async (c) => {
+    const identity = deps.walletAuth.identity(c.req.header("x-happy-wallet-session"), true);
+    if (!identity) throw new HttpError(401, "Connect and authorize your wallet first.");
+    if (identity.userId !== c.get("user").id) {
+      throw new HttpError(403, "This wallet is authorized for a different Happy account.");
+    }
+    return c.json(await deps.funding.refresh(identity.userId, c.req.param("txHash")));
+  });
+  app.post("/v1/wallet/topup", () => {
+    throw new HttpError(
+      410,
+      "Synthetic top-ups were removed. Transfer XSGD and register it with /v1/wallet/deposits.",
+    );
   });
 
-  app.get("/v1/mandate", async (c) => c.json(await deps.repository.getMandate(DEFAULT_USER_ID)));
+  app.get("/v1/mandate", async (c) => c.json(await deps.repository.getMandate(c.get("user").id)));
   app.patch("/v1/mandate", async (c) => {
     const patch = await parseBody(c.req.raw, MandatePatch);
-    const current = await deps.repository.getMandate(DEFAULT_USER_ID);
+    const userId = c.get("user").id;
+    const current = await deps.repository.getMandate(userId);
     const mandate = {
       autoApprove: patch.autoApprove ?? current.autoApprove,
       itemCap: patch.itemCap ?? current.itemCap,
@@ -271,25 +344,26 @@ export function createApp(deps: AppDependencies): Hono {
     if (mandate.itemCap > mandate.actCap) {
       throw new HttpError(422, "Per-item cap cannot exceed the per-activity cap.");
     }
-    await deps.repository.putMandate(DEFAULT_USER_ID, mandate);
+    await deps.repository.putMandate(userId, mandate);
     return c.json(mandate);
   });
 
-  app.get("/v1/settings", async (c) => c.json(await deps.repository.getSettings(DEFAULT_USER_ID)));
+  app.get("/v1/settings", async (c) => c.json(await deps.repository.getSettings(c.get("user").id)));
   app.patch("/v1/settings", async (c) => {
     const patch = await parseBody(c.req.raw, SettingsPatch);
-    const current = await deps.repository.getSettings(DEFAULT_USER_ID);
+    const userId = c.get("user").id;
+    const current = await deps.repository.getSettings(userId);
     const settings = {
       notify: patch.notify ?? current.notify,
       sandbox: patch.sandbox ?? current.sandbox,
       region: patch.region ?? current.region,
       dataRetention: patch.dataRetention ?? current.dataRetention,
     };
-    await deps.repository.putSettings(DEFAULT_USER_ID, settings);
+    await deps.repository.putSettings(userId, settings);
     return c.json(settings);
   });
 
-  app.get("/v1/profile", async (c) => c.json(await deps.repository.getProfile(DEFAULT_USER_ID)));
+  app.get("/v1/profile", (c) => c.json(profileForUser(c.get("user"))));
 
   app.notFound((c) => c.text("Endpoint not found.", 404));
   app.onError((error, c) => {
@@ -301,6 +375,25 @@ export function createApp(deps: AppDependencies): Hono {
   });
 
   return app;
+}
+
+function profileForUser(user: AuthUser): Profile {
+  const joined = new Intl.DateTimeFormat("en-SG", {
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Singapore",
+  }).format(new Date(user.createdAt));
+  return {
+    name: user.name,
+    email: user.email,
+    initials: user.initials,
+    memberSince: `Account active · ${joined}`,
+    rows: [
+      { k: "Email", v: user.email },
+      { k: "Account security", v: "Email and password" },
+      { k: "Funding wallet", v: "Connected separately" },
+    ],
+  };
 }
 
 async function parseBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {

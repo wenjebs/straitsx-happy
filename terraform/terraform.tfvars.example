@@ -12,5 +12,15 @@ openai_model                = "gpt-5.6-luna"
 card_api_base_url           = ""
 purchase_agent_api_base_url = ""
 
+# Set to "chain" after filling Happy's public shared-wallet address.
+funding_mode          = "disabled"
+happy_wallet_address = ""
+funding_chain_id      = 43113
+funding_rpc_url       = "https://api.avax-test.network/ext/bc/C/rpc"
+xsgd_address          = "0xd769410dc8772695a7f55a304d2125320a65c2a5"
+funding_network_name  = "Avalanche Fuji C-Chain"
+funding_explorer_url  = "https://subnets-test.avax.network/c-chain"
+deposit_confirmations = 1
+
 payment_min_minor  = 500
 payment_max_minor  = 3000

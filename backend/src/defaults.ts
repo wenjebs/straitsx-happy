@@ -10,6 +10,17 @@ export function defaultWallet(): Wallet {
   };
 }
 
+/** A newly authenticated funding account starts empty; only verified deposits can credit it. */
+export function defaultFundingWallet(): Wallet {
+  return {
+    balanceMinor: 0,
+    address: "Not configured",
+    network: "Not configured",
+    cards: [],
+    transactions: [],
+  };
+}
+
 export function defaultMandate(): Mandate {
   return {
     autoApprove: true,
