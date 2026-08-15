@@ -125,6 +125,26 @@ export class ActivityService {
     return activity;
   }
 
+  async reopenWishlist(id: string): Promise<Activity> {
+    const activity = await this.requireStage(id, "curate");
+    const wishlistMessageIndex = activity.messages.findIndex(
+      (message) => message.role === "assistant" && message.card === "wishlist",
+    );
+    if (wishlistMessageIndex < 0) {
+      throw new HttpError(409, "This activity has no prepared wishlist to reopen.");
+    }
+
+    activity.stage = "wishlist";
+    activity.messages = activity.messages.slice(0, wishlistMessageIndex + 1);
+    activity.clarifications = activity.clarifications.map((clarification) => {
+      const reset = { ...clarification };
+      delete reset.chosen;
+      return reset;
+    });
+    await this.saveSnapshot(activity, "wishlist.reopened");
+    return activity;
+  }
+
   async chooseOption(id: string, itemId: string, optionName: string): Promise<Activity> {
     const activity = await this.requireStage(id, "curate");
     const clarification = activity.clarifications.find((row) => row.itemId === itemId);

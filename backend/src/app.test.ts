@@ -191,6 +191,29 @@ describe("Happy backend contract", () => {
       body: JSON.stringify({ option: "Quiet" }),
     });
     expect(chosen.status).toBe(200);
+
+    const reopened = (await (
+      await app.request(`/v1/activities/${created.id}/wishlist/reopen`, { method: "POST" })
+    ).json()) as {
+      stage: string;
+      messages: { card?: string }[];
+      clarifications: { chosen?: string }[];
+    };
+    expect(reopened.stage).toBe("wishlist");
+    expect(reopened.messages).toHaveLength(2);
+    expect(reopened.messages.at(-1)?.card).toBe("wishlist");
+    expect(reopened.clarifications.every((row) => row.chosen === undefined)).toBe(true);
+    const reopenedHistory = (await (
+      await app.request(`/v1/activities/${created.id}/checkpoints`)
+    ).json()) as { reason: string }[];
+    expect(reopenedHistory.at(-1)?.reason).toBe("wishlist.reopened");
+
+    await app.request(`/v1/activities/${created.id}/wishlist/approve`, { method: "POST" });
+    await app.request(`/v1/activities/${created.id}/clarifications/keyboard`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ option: "Quiet" }),
+    });
     const dispatch = await app.request(`/v1/activities/${created.id}/dispatch`, { method: "POST" });
     expect(dispatch.status).toBe(200);
     expect(agents.searches).toBe(1);

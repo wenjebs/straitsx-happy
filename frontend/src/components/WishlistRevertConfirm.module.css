@@ -1,0 +1,85 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 16, 18, 0.28);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 10;
+  animation: h-in 160ms ease both;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 20px 22px;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.body {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-wrap: pretty;
+}
+
+.warning {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.cancel,
+.confirm {
+  padding: 9px 15px;
+  border-radius: var(--r-control);
+  font-size: 12.5px;
+}
+
+.cancel {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.confirm {
+  margin-left: auto;
+  border: none;
+  background: var(--text-primary);
+  color: var(--surface);
+  font-weight: 500;
+}
+
+.cancel:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.confirm:hover {
+  background: var(--hover-primary);
+}
+
+.cancel:disabled,
+.confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

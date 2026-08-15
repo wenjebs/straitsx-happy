@@ -289,6 +289,25 @@ class MockBackend {
     return this.clone(this.current);
   }
 
+  async reopenWishlist(_id: string): Promise<Activity> {
+    if (this.current?.stage !== "curate") {
+      throw new Error("activity is not awaiting clarification");
+    }
+    const wishlistMessageIndex = this.current.messages.findIndex(
+      (message) => message.role === "assistant" && message.card === "wishlist",
+    );
+    if (wishlistMessageIndex < 0) throw new Error("activity has no prepared wishlist");
+    this.current.stage = "wishlist";
+    this.current.messages = this.current.messages.slice(0, wishlistMessageIndex + 1);
+    this.current.clarifications = this.current.clarifications.map((clarification) => {
+      const reset = { ...clarification };
+      delete reset.chosen;
+      return reset;
+    });
+    this.snapshot();
+    return this.clone(this.current);
+  }
+
   private curatorMessage(itemId: ItemId): Message {
     const item = ITEMS.find((i) => i.id === itemId);
     const text =

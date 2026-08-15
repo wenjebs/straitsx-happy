@@ -110,7 +110,11 @@ function MessageBody({
 
         {message.card === "thinking" && (
           <div className={styles.thinking}>
-            <span className={styles.thinkingDot} />
+            <span className={styles.thinkingDots} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
             <span>{message.thinkingLabel}</span>
           </div>
         )}

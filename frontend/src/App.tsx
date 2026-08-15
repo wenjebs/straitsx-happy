@@ -5,6 +5,7 @@ import { Header } from "./components/Header";
 import { PurchaseConfirm } from "./components/PurchaseConfirm";
 import { Sidebar } from "./components/Sidebar";
 import { StageBar } from "./components/StageBar";
+import { WishlistRevertConfirm } from "./components/WishlistRevertConfirm";
 import type { ActivityStage } from "./lib/Api";
 import { isLive } from "./lib/Api";
 import { ArchiveScreen } from "./screens/ArchiveScreen";
@@ -159,6 +160,14 @@ export function App() {
           submitting={state.purchaseSubmitting}
           onCancel={actions.cancelPurchase}
           onConfirm={() => void actions.confirmPurchase()}
+        />
+      )}
+
+      {state.confirmingWishlistRevert && flow && (
+        <WishlistRevertConfirm
+          submitting={state.wishlistReverting}
+          onCancel={actions.cancelWishlistEdit}
+          onConfirm={() => void actions.confirmWishlistEdit()}
         />
       )}
     </div>

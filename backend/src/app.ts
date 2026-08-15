@@ -98,6 +98,10 @@ export function createApp(deps: AppDependencies): Hono {
     c.json(await deps.activities.approveWishlist(c.req.param("id"))),
   );
 
+  app.post("/v1/activities/:id/wishlist/reopen", async (c) =>
+    c.json(await deps.activities.reopenWishlist(c.req.param("id"))),
+  );
+
   app.post("/v1/activities/:id/clarifications/:itemId", async (c) => {
     const body = await parseBody(c.req.raw, ChooseOptionBody);
     return c.json(

@@ -328,6 +328,11 @@ export function approveWishlist(id: string): Promise<Activity> {
   return isLive() ? post(`/v1/activities/${id}/wishlist/approve`) : mockBackend.approveWishlist(id);
 }
 
+/** Returns curation to the editable wishlist and discards all option choices. */
+export function reopenWishlist(id: string): Promise<Activity> {
+  return isLive() ? post(`/v1/activities/${id}/wishlist/reopen`) : mockBackend.reopenWishlist(id);
+}
+
 /** Locks one curator option for an item. */
 export function chooseOption(id: string, itemId: string, option: string): Promise<Activity> {
   return isLive()

@@ -197,6 +197,7 @@ All paths are relative to `VITE_API_BASE_URL`.
 | `POST` | `/v1/activities/:id/wishlist/items` | `{ "name": string }` | `Activity` |
 | `DELETE` | `/v1/activities/:id/wishlist/items/:itemId` | — | `Activity` |
 | `POST` | `/v1/activities/:id/wishlist/approve` | — | `Activity` |
+| `POST` | `/v1/activities/:id/wishlist/reopen` | — | `Activity` |
 | `POST` | `/v1/activities/:id/clarifications/:itemId` | `{ "option": string }` | `Activity` |
 | `POST` | `/v1/activities/:id/dispatch` | — | `Activity` |
 | `POST` | `/v1/activities/:id/search/pause` | — | `Activity` |
@@ -205,10 +206,9 @@ All paths are relative to `VITE_API_BASE_URL`.
 | `POST` | `/v1/activities/:id/purchase` | `{ "idempotencyKey": string }` | `Activity` |
 | `GET` | `/v1/activities/:id/events` | — | `text/event-stream` (§5) |
 
-`GET /v1/activities` drives the activity feed. Return the running activity (if
-any) with `status: "live"`, plus completed and cancelled ones. **At most one
-activity may be `live`** — the frontend picks the first one it finds and treats
-it as the running activity.
+`GET /v1/activities` drives the activity feed. Return every activity newest
+first, including all records with `status: "live"` plus completed and cancelled
+ones.
 
 `POST /v1/activities` creates from a free-text goal and should return with
 `stage: "wishlist"` and the two opening messages already present (the user's
@@ -224,6 +224,12 @@ The backend persists each transition as both the current activity document and a
 checkpoint. In particular, `wishlist.prepared` must commit before approval. The approval endpoint
 reloads that stored document and advances it to curation; it does not reuse an in-process planner
 result.
+
+`POST .../wishlist/reopen` is valid in `curate`. It returns the activity to
+`wishlist`, removes every message after the prepared wishlist card, clears every
+`clarifications[].chosen`, and persists the transition as `wishlist.reopened`.
+The frontend asks for confirmation before calling it because those choices are
+intentionally discarded.
 
 `POST .../clarifications/:itemId` locks one option. When the last ambiguous item
 is resolved, append the assistant message with `card: "locked"` — that is what
@@ -412,6 +418,7 @@ POST /v1/activities                    { goal }            -> stage: wishlist
   SSE activity.snapshot                                     (thinking -> wishlist card)
 POST /v1/activities/:id/wishlist/approve                   -> stage: curate
   SSE activity.snapshot                                     (first curator card)
+# Optional reset: POST .../wishlist/reopen -> wishlist, edit, then approve again
 POST /v1/activities/:id/clarifications/gpu   { option }
   SSE activity.snapshot                                     (second curator card)
 POST /v1/activities/:id/clarifications/case  { option }

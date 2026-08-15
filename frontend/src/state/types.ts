@@ -18,6 +18,9 @@ export interface HappyState {
   draft: string;
   newItem: string;
   editing: boolean;
+  /** Confirmation before discarding curator choices and returning to wishlist editing. */
+  confirmingWishlistRevert: boolean;
+  wishlistReverting: boolean;
   /** Guards the irreversible purchase call behind an explicit confirmation. */
   confirmingPurchase: boolean;
   /** Set while a spend call is in flight, so it cannot be submitted twice. */

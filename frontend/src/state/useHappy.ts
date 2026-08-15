@@ -10,6 +10,8 @@ const initialState: HappyState = {
   draft: "",
   newItem: "",
   editing: false,
+  confirmingWishlistRevert: false,
+  wishlistReverting: false,
   confirmingPurchase: false,
   purchaseSubmitting: false,
   elapsed: 0,
@@ -121,6 +123,9 @@ export interface HappyActions {
   setDraft: (value: string) => void;
   setNewItem: (value: string) => void;
   toggleEditing: () => void;
+  requestWishlistEdit: () => void;
+  cancelWishlistEdit: () => void;
+  confirmWishlistEdit: () => Promise<void>;
   addItem: () => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   approveWishlist: () => Promise<void>;
@@ -252,6 +257,8 @@ export function useHappy(): Happy {
         viewingArchive: null,
         draft: "",
         editing: false,
+        confirmingWishlistRevert: false,
+        wishlistReverting: false,
       });
       void Api.listActivities()
         .then((activities) =>
@@ -277,6 +284,28 @@ export function useHappy(): Happy {
       setDraft: (value) => set({ draft: value }),
       setNewItem: (value) => set({ newItem: value }),
       toggleEditing: () => set({ editing: !stateRef.current.editing }),
+      requestWishlistEdit: () => {
+        if (stateRef.current.running?.stage === "curate") {
+          set({ confirmingWishlistRevert: true });
+        }
+      },
+      cancelWishlistEdit: () => set({ confirmingWishlistRevert: false }),
+      confirmWishlistEdit: async () => {
+        const { running, wishlistReverting } = stateRef.current;
+        if (!running || wishlistReverting) return;
+        set({ wishlistReverting: true });
+        try {
+          applied(await Api.reopenWishlist(running.id));
+          set({
+            editing: true,
+            confirmingWishlistRevert: false,
+            wishlistReverting: false,
+          });
+        } catch (error) {
+          set({ wishlistReverting: false });
+          fail(error);
+        }
+      },
       toggleSidebar: () => set({ sidebarOpen: !stateRef.current.sidebarOpen }),
       dismissError: () => set({ error: null }),
 
@@ -305,7 +334,10 @@ export function useHappy(): Happy {
       approveWishlist: () =>
         guard(async () => {
           const { running } = stateRef.current;
-          if (running) applied(await Api.approveWishlist(running.id));
+          if (running) {
+            applied(await Api.approveWishlist(running.id));
+            set({ editing: false });
+          }
         }),
 
       choose: (itemId, option) =>
@@ -376,6 +408,8 @@ export function useHappy(): Happy {
           set({
             screen: "purchase",
             focused: activity.id,
+            confirmingWishlistRevert: false,
+            wishlistReverting: false,
             activities: upsertActivity(stateRef.current.activities, activity),
             ...(activity.status === "live"
               ? { running: activity, viewingArchive: null }
