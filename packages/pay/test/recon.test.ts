@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Db, openDb } from "../src/db.js";
 import * as L from "../src/ledger.js";
-import { resolvePending } from "../src/recon.js";
+import { resolvePending, startRecon } from "../src/recon.js";
 
 const cfg = {
   minCardCents: 500,
@@ -96,5 +96,45 @@ describe("resolvePending", () => {
     const card = db.raw.prepare(`SELECT opaque_id FROM cards WHERE purchase_id=?`).get(p.id) as any;
     expect(row.state).toBe("CARD_ISSUED");
     expect(card.opaque_id).toBe("card_recovered");
+  });
+});
+
+describe("startRecon", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not re-enter resolvePending while a previous tick is still in flight", async () => {
+    await pendingPurchase(new Date(Date.now() - 1000).toISOString());
+
+    let calls = 0;
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const slowWallet = {
+      authorizationUsed: async () => {
+        calls++;
+        await gate;
+        return false;
+      },
+      view: () => chain,
+    } as any;
+
+    vi.useFakeTimers();
+    const stop = startRecon({ db, cfg, wallet: slowWallet }, 10);
+    try {
+      vi.advanceTimersByTime(10); // tick 1: enters resolvePending, suspends on the gate
+      vi.advanceTimersByTime(10); // tick 2: previous tick still in flight — must be skipped
+      expect(calls).toBe(1);
+    } finally {
+      stop(); // clear the interval before releasing the gate, or the repeating timer never quiesces
+      releaseGate();
+      // Flush the microtask queue so the released tick's promise chain (and its
+      // `running = false` reset) settles before the test ends.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
   });
 });

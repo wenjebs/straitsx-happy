@@ -106,9 +106,25 @@ export async function resolvePending(deps: ReconDeps) {
 }
 
 export function startRecon(deps: ReconDeps, intervalMs = 10_000) {
+  // Re-entrancy guard: resolvePending awaits a chain read and possibly an issuer.send()
+  // replay, and the payments row stays PENDING until the write after that await resolves.
+  // Without this, a tick slower than intervalMs would re-select the same PENDING row and
+  // call issuer.send() for it again, concurrently — the double-send shape, even though the
+  // nonce being single-use on-chain means it can't actually double-pay.
+  let running = false;
   // unref so a running reconciler never holds a test worker or a CLI process open
   const timer = setInterval(() => {
-    void resolvePending(deps).catch(() => {});
+    if (!running) {
+      running = true;
+      void resolvePending(deps)
+        .catch(() => {})
+        .finally(() => {
+          running = false;
+        });
+    }
+    // Fires every tick regardless of whether resolvePending is in flight — it's
+    // synchronous and cheap, and skipping it during a long reconciliation would let
+    // reservations outlive their TTL.
     releaseExpired(deps.db);
   }, intervalMs);
   timer.unref?.();
