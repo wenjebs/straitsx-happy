@@ -584,7 +584,25 @@ StraitsX, not engineering tasks.
 
 ---
 
-## 9. Shopee: no
+## 9. Shopee: no — now confirmed by probing, not by reasoning
+
+**Measured on 15 Aug 2026.** A headed Chromium, driven by Playwright, asked for a product page:
+
+```
+GET https://shopee.sg/Roku-Gin-43-700ml-i.2685549.19284714232
+ -> https://shopee.sg/verify/traffic/error?...&is_logged_in=false&...&type=4
+    "Login Required — Looks like you're not logged in yet."
+```
+
+The homepage loads. **No product page loads.** Shopee sends the browser to a traffic check before
+any listing appears, so the agent never reaches a price, let alone a checkout.
+
+A human then tried to sign in by hand, in the same browser profile, to see whether a session passes
+the check. The sign-in itself was stopped by a captcha, and the redirect still reported
+`is_logged_in=false`. So the question "does a logged-in session pass?" is still formally open, and
+it does not matter: reaching the answer already needs a person to defeat a puzzle every time.
+
+The reasoning below was written before that test. The test agrees with it.
 
 **An unattended agent cannot complete a Shopee purchase, and attempting one on the live rail risks
 real money for a near-certain failure.** Four independent blockers, any one of which is fatal:
