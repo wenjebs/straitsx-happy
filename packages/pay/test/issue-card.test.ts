@@ -41,6 +41,15 @@ describe("issueCardFor", () => {
     const r = await issueCardFor(deps, p.id, 1800);
     expect(r.last4).toHaveLength(4);
     expect(L.totals(db)).toMatchObject({ spentCents: 1800, reservedCents: 0 });
+    // A PENDING row left behind on an issued purchase gets picked up by reconciliation:
+    // if the chain reports the nonce unused, it marks the purchase FAILED and releases
+    // budget for a card that already exists. The step-4 transaction must have settled it.
+    const pay = db.raw
+      .prepare(`SELECT state, tx_hash, amount_cents FROM payments WHERE purchase_id=?`)
+      .get(p.id) as any;
+    expect(pay.state).toBe("SETTLED");
+    expect(pay.tx_hash).toBe(r.settlementTx);
+    expect(pay.amount_cents).toBe(1800); // the amount actually authorised, not a stale quote
   });
 
   it("returns the same card on a second call and issues nothing new", async () => {
@@ -102,5 +111,37 @@ describe("issueCardFor", () => {
     // the row must carry what reconciliation needs: a real on-chain nonce and replayable bytes
     expect(pay.nonce).toMatch(/^0x[0-9a-f]{64}$/);
     expect(pay.envelope).toBeTruthy();
+  });
+
+  it("refuses a final total that crosses into NEEDS_HUMAN even though the quote was auto-approved", async () => {
+    // Quote 2480 is under the 2500 per-item cap, so reserveQuote auto-approves it (ALLOW).
+    // Final total 2525 is inside the 200bps tolerance ceiling of 2529 (no PRICE_CHANGED) but
+    // over the per-item cap, so re-decision returns NEEDS_HUMAN. The frozen `approved` flag
+    // must not be treated as approval of this higher final amount.
+    const p = await L.reserveQuote(db, cfg, wallet.view(), {
+      amountCents: 2480,
+      merchantHost: "shop.example.com",
+      itemName: "monitor",
+    });
+    const deps = { db, cfg, issuer: new MockIssuer(), wallet };
+    await expect(issueCardFor(deps, p.id, 2525)).rejects.toThrow(/approval/);
+    const card = db.raw.prepare(`SELECT * FROM cards WHERE purchase_id=?`).get(p.id);
+    expect(card).toBeUndefined();
+  });
+
+  it("does not deny a purchase by its own held reservation against a tight daily cap", async () => {
+    // A loose daily cap (the fixture default of 15000) never exercises the ownReservationCents
+    // exclusion in decide() — a purchase's own RESERVED hold would need to double-count with
+    // itself to breach it. Tighten the cap to 2000 against a 1800 reservation so the exclusion
+    // has to work for issuance to succeed at all.
+    await L.createMandate(db, cfg, {
+      perItemCents: 2500,
+      dailyCents: 2000,
+      merchants: ["shop.example.com"],
+      expiresAt: new Date("2026-08-20T00:00:00Z"),
+    });
+    const p = await reserve();
+    const deps = { db, cfg, issuer: new MockIssuer(), wallet };
+    await expect(issueCardFor(deps, p.id, 1800)).resolves.toBeTruthy();
   });
 });
