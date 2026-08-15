@@ -143,11 +143,8 @@ export function App() {
 
           {onPurchase && state.focused === null && (
             <ActivityFeed
-              running={state.running}
-              archived={state.archived}
-              currentOnScreen={!state.detached}
-              onOpenCurrent={actions.openCurrent}
-              onOpenArchive={(id) => void actions.openArchive(id)}
+              activities={state.activities}
+              onOpen={(id) => void actions.openActivity(id)}
               onNew={actions.newActivity}
             />
           )}

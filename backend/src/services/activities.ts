@@ -37,16 +37,6 @@ export class ActivityService {
   }
 
   async create(goal: string, userId = DEFAULT_USER_ID): Promise<Activity> {
-    const existing = (await this.repository.listActivities(userId)).find(
-      (activity) => activity.status === "live",
-    );
-    if (existing) {
-      throw new HttpError(
-        409,
-        `Activity “${existing.title}” is still live. Complete or cancel it before starting another.`,
-      );
-    }
-
     const activity: Activity = {
       id: newId("act"),
       userId,

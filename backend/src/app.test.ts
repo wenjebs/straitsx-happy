@@ -100,6 +100,21 @@ describe("Happy backend contract", () => {
     const created = (await createdResponse.json()) as { id: string };
     expect(agents.plans).toBe(1);
 
+    const secondResponse = await app.request("/v1/activities", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: "buy a mouse while the keyboard activity is still live" }),
+    });
+    expect(secondResponse.status).toBe(201);
+    const second = (await secondResponse.json()) as { id: string };
+    expect(second.id).not.toBe(created.id);
+    expect(agents.plans).toBe(2);
+    const liveActivities = (await (await app.request("/v1/activities")).json()) as {
+      id: string;
+      status: string;
+    }[];
+    expect(liveActivities.filter((activity) => activity.status === "live")).toHaveLength(2);
+
     const unauthorized = await app.request(`/v1/integrations/agents/${created.id}/events`, {
       method: "POST",
       headers: { "content-type": "application/json" },

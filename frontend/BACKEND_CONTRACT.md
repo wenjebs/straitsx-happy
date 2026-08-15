@@ -215,6 +215,11 @@ it as the running activity.
 goal, and an assistant message with `card: "thinking"`). Emit a snapshot over
 SSE when the real wishlist replaces the thinking state.
 
+More than one activity may have `status: "live"`. Starting a new activity must
+not cancel, replace, or reject another in-progress activity. The client lists
+all activities on the blank new-chat page and subscribes to every live activity,
+while a focused activity is displayed without the activity list beside it.
+
 The backend persists each transition as both the current activity document and an immutable full
 checkpoint. In particular, `wishlist.prepared` must commit before approval. The approval endpoint
 reloads that stored document and advances it to curation; it does not reuse an in-process planner
