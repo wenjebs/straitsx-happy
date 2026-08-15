@@ -1,9 +1,12 @@
+import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import type { Config } from "./config.js";
+import { HttpError } from "./errors.js";
 import { EventHub } from "./events.js";
 import type { AgentProvider } from "./providers/agent.js";
 import type { CardProvider, IssueCardRequest, IssuedCard, TopUpResult } from "./providers/card.js";
+import type { DepositInspection, FundingProvider } from "./providers/funding.js";
 import type {
   PurchaseAgentCancelRequest,
   PurchaseAgentProvider,
@@ -11,7 +14,11 @@ import type {
 } from "./providers/purchaseAgent.js";
 import { MemoryRepository } from "./repositories/memory.js";
 import { ActivityService } from "./services/activities.js";
+import type { AuthService, AuthUser } from "./services/auth.js";
+import { DisabledAuthService } from "./services/auth.js";
 import { PurchaseService } from "./services/purchases.js";
+import { WalletAuthService } from "./services/walletAuth.js";
+import { WalletFundingService } from "./services/walletFunding.js";
 import { FrameHub } from "./streams.js";
 
 const config: Config = {
@@ -21,6 +28,7 @@ const config: Config = {
   AWS_REGION: "ap-southeast-1",
   FRONTEND_ORIGIN: "http://localhost:4040",
   PUBLIC_BASE_URL: "http://localhost:8787",
+  AUTH_MODE: "disabled",
   PLANNER_MODE: "remote",
   SCOUT_MODE: "remote",
   AGENTCORE_BROWSER_ID: "aws.browser.v1",
@@ -35,6 +43,16 @@ const config: Config = {
   CARD_MODE: "remote",
   PURCHASE_AGENT_MODE: "remote",
   PURCHASE_CALLBACK_TOKEN: "purchase-callback-secret",
+  FUNDING_MODE: "chain",
+  HAPPY_WALLET_ADDRESS: "0x1111111111111111111111111111111111111111",
+  CHAIN_ID: 43113,
+  RPC_URL: "https://rpc.example",
+  XSGD_ADDRESS: "0x2222222222222222222222222222222222222222",
+  XSGD_DECIMALS: 6,
+  FUNDING_NETWORK_NAME: "Avalanche Fuji C-Chain",
+  FUNDING_EXPLORER_URL: "https://explorer.example",
+  DEPOSIT_CONFIRMATIONS: 1,
+  WALLET_AUTH_SECRET: "test-wallet-auth-secret-that-is-long-enough",
   PAYMENT_MIN_MINOR: 500,
   PAYMENT_MAX_MINOR: 3000,
   PAYMENT_ATTEMPTS_PER_LISTING: 2,
@@ -75,7 +93,64 @@ class RecordingPurchaseAgents implements PurchaseAgentProvider {
   async cancelPurchase(_request: PurchaseAgentCancelRequest): Promise<void> {}
 }
 
-function harness() {
+class RecordingFunding implements FundingProvider {
+  readonly mode = "chain" as const;
+  inspection: DepositInspection = {
+    status: "confirmed",
+    confirmations: 2,
+    amountAtomic: 25_000_000n,
+    amountMinor: 2500,
+    blockNumber: 123n,
+  };
+
+  configuration() {
+    return {
+      enabled: true as const,
+      mode: "chain" as const,
+      walletAddress: "0x1111111111111111111111111111111111111111",
+      tokenAddress: "0x2222222222222222222222222222222222222222",
+      tokenSymbol: "XSGD" as const,
+      tokenDecimals: 6,
+      chainId: 43113,
+      networkName: "Avalanche Fuji C-Chain",
+      rpcUrl: "https://rpc.example",
+      explorerUrl: "https://explorer.example",
+      requiredConfirmations: 1,
+    };
+  }
+
+  async inspectDeposit(): Promise<DepositInspection> {
+    return this.inspection;
+  }
+}
+
+class TestAuth extends DisabledAuthService {
+  override async authenticate(): Promise<AuthUser> {
+    return {
+      id: "test-user",
+      email: "test@happy.local",
+      name: "Test User",
+      initials: "TU",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    };
+  }
+}
+
+class HeaderAuth extends DisabledAuthService {
+  override async authenticate(authorization: string | undefined): Promise<AuthUser> {
+    if (!authorization?.startsWith("Bearer user-")) throw new HttpError(401, "Login required.");
+    const id = authorization.slice("Bearer ".length);
+    return {
+      id,
+      email: `${id}@happy.local`,
+      name: id,
+      initials: id.slice(-1).toUpperCase().padStart(2, "U"),
+      createdAt: "2026-08-15T00:00:00.000Z",
+    };
+  }
+}
+
+function harness(auth: AuthService = new TestAuth()) {
   const repository = new MemoryRepository();
   const events = new EventHub();
   const agents = new RecordingAgents();
@@ -83,9 +158,13 @@ function harness() {
   const purchaseAgents = new RecordingPurchaseAgents();
   const activities = new ActivityService(repository, events, agents, agents);
   const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
+  const fundingProvider = new RecordingFunding();
+  const funding = new WalletFundingService(repository, fundingProvider);
+  const walletAuth = new WalletAuthService(config.WALLET_AUTH_SECRET);
   return {
     repository,
     agents,
+    fundingProvider,
     app: createApp({
       config,
       repository,
@@ -96,12 +175,64 @@ function harness() {
       purchaseAgents,
       activities,
       purchases,
+      funding,
+      walletAuth,
+      auth,
       frames: new FrameHub(),
     }),
   };
 }
 
+const fundingAccount = privateKeyToAccount(
+  "0x0123456789012345678901234567890123456789012345678901234567890123",
+);
+
+async function authorizeWallet(app: ReturnType<typeof createApp>): Promise<string> {
+  const challengeResponse = await app.request("/v1/wallet/auth/challenge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address: fundingAccount.address }),
+  });
+  const challenge = (await challengeResponse.json()) as {
+    challengeToken: string;
+    message: string;
+  };
+  const signature = await fundingAccount.signMessage({ message: challenge.message });
+  const verification = await app.request("/v1/wallet/auth/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ challengeToken: challenge.challengeToken, signature }),
+  });
+  const session = (await verification.json()) as { sessionToken: string };
+  return session.sessionToken;
+}
+
 describe("Happy backend contract", () => {
+  it("requires login and keeps activities scoped to their owner", async () => {
+    const { app } = harness(new HeaderAuth());
+    expect((await app.request("/v1/activities")).status).toBe(401);
+
+    const createdResponse = await app.request("/v1/activities", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer user-a" },
+      body: JSON.stringify({ goal: "buy a private test item" }),
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = (await createdResponse.json()) as { id: string };
+
+    const otherList = (await (
+      await app.request("/v1/activities", { headers: { authorization: "Bearer user-b" } })
+    ).json()) as unknown[];
+    expect(otherList).toEqual([]);
+    expect(
+      (
+        await app.request(`/v1/activities/${created.id}`, {
+          headers: { authorization: "Bearer user-b" },
+        })
+      ).status,
+    ).toBe(404);
+  });
+
   it("creates a real agent run and accepts authenticated wishlist/live-stream callbacks", async () => {
     const { app, agents } = harness();
     const createdResponse = await app.request("/v1/activities", {
@@ -282,16 +413,71 @@ describe("Happy backend contract", () => {
     );
   });
 
-  it("uses the real top-up provider rather than fabricating a receipt", async () => {
+  it("credits a verified XSGD deposit exactly once", async () => {
     const { app } = harness();
-    const response = await app.request("/v1/wallet/topup", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amountMinor: 50000 }),
+    const sessionToken = await authorizeWallet(app);
+    const body = JSON.stringify({
+      txHash: `0x${"ab".repeat(32)}`,
+      sourceAddress: fundingAccount.address,
     });
-    expect(response.status).toBe(200);
-    const wallet = (await response.json()) as { balanceMinor: number; receipt: string };
-    expect(wallet.balanceMinor).toBe(532050);
-    expect(wallet.receipt).toContain("0xtopup");
+    const response = await app.request("/v1/wallet/deposits", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-happy-wallet-session": sessionToken,
+      },
+      body,
+    });
+    expect(response.status).toBe(201);
+    const result = (await response.json()) as {
+      wallet: { balanceMinor: number; receipt: string };
+      deposit: { status: string };
+    };
+    expect(result.wallet.balanceMinor).toBe(2500);
+    expect(result.wallet.receipt).toContain("XSGD received");
+    expect(result.deposit.status).toBe("confirmed");
+
+    const duplicate = await app.request("/v1/wallet/deposits", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-happy-wallet-session": sessionToken,
+      },
+      body,
+    });
+    expect(duplicate.status).toBe(201);
+    const duplicateResult = (await duplicate.json()) as { wallet: { balanceMinor: number } };
+    expect(duplicateResult.wallet.balanceMinor).toBe(2500);
+  });
+
+  it("requires wallet ownership and keeps funding accounts isolated", async () => {
+    const { app } = harness();
+    const body = JSON.stringify({
+      txHash: `0x${"cd".repeat(32)}`,
+      sourceAddress: fundingAccount.address,
+    });
+    expect(
+      (
+        await app.request("/v1/wallet/deposits", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        })
+      ).status,
+    ).toBe(401);
+
+    const sessionToken = await authorizeWallet(app);
+    const wrongSource = await app.request("/v1/wallet/deposits", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-happy-wallet-session": sessionToken,
+      },
+      body: JSON.stringify({
+        txHash: `0x${"ef".repeat(32)}`,
+        sourceAddress: "0x4444444444444444444444444444444444444444",
+      }),
+    });
+    expect(wrongSource.status).toBe(403);
   });
 });

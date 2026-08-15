@@ -78,21 +78,44 @@ export interface ExecutionRow {
   liveStreamUrl?: string | undefined;
 }
 
-/** Durable cursor for the asynchronous Closer-agent purchase state machine. */
-export interface PurchaseRun {
-  activityId: string;
-  userId: string;
-  idempotencyKey: string;
-  status: "running" | "completed" | "failed" | "cancelled";
-  itemIndex: number;
+/**
+ * One item's attempt at being bought: its own card, its own grant, its own browser.
+ *
+ * Kept per attempt rather than per run so several items can be in flight at once. The whole point
+ * of the split is that a callback names an `attemptId`, and everything it needs to act on — which
+ * item, which candidate listing, which card — hangs off that id. Sharing one set of card fields
+ * across concurrent attempts is how a card claimed for one item gets credited to another.
+ */
+export interface PurchaseAttempt {
+  attemptId: string;
+  itemId: string;
+  /** Which of the item's candidate listings this attempt is for. */
   candidateIndex: number;
+  /** Which retry of that candidate. */
   attemptIndex: number;
-  attemptId?: string | undefined;
   cardGrantHash?: string | undefined;
   cardGrantExpiresAt?: string | undefined;
   cardClaimedAt?: string | undefined;
   cardId?: string | undefined;
   cardLast4?: string | undefined;
+}
+
+/** How far one shortlist item has got, independent of the others. */
+export interface PurchaseItemProgress {
+  candidateIndex: number;
+  attemptIndex: number;
+  done: boolean;
+}
+
+export interface PurchaseRun {
+  activityId: string;
+  userId: string;
+  idempotencyKey: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  /** Live attempts, keyed by attemptId. Several at once. */
+  attempts: Record<string, PurchaseAttempt>;
+  /** Per shortlist item, keyed by itemId. */
+  progress: Record<string, PurchaseItemProgress>;
   processedEventIds: string[];
   updatedAt: string;
 }
@@ -150,20 +173,76 @@ export interface ActivityCheckpoint {
   activity: Activity;
 }
 
+export interface WalletTransaction {
+  id: string;
+  ts: string;
+  label: string;
+  ref: string;
+  amount: string;
+  debit: boolean;
+}
+
 export interface Wallet {
   balanceMinor: number;
   address: string;
   network: string;
   cards: { pan: string; amount: string; status: "issued" | "viewed" | "used" | "expired" }[];
-  transactions: {
-    id: string;
-    ts: string;
-    label: string;
-    ref: string;
-    amount: string;
-    debit: boolean;
-  }[];
+  transactions: WalletTransaction[];
   receipt?: string;
+}
+
+export type WalletDepositStatus = "pending" | "confirmed" | "failed";
+
+/** Durable, idempotent record of an on-chain XSGD transfer into Happy's shared wallet. */
+export interface WalletDeposit {
+  id: string;
+  userId: string;
+  txHash: string;
+  sourceAddress: string;
+  destinationAddress: string;
+  tokenAddress: string;
+  chainId: number;
+  status: WalletDepositStatus;
+  amountAtomic: string | null;
+  amountMinor: number | null;
+  confirmations: number;
+  requiredConfirmations: number;
+  blockNumber?: string | undefined;
+  failureReason?: string | undefined;
+  explorerUrl?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string | undefined;
+}
+
+export type FundingConfiguration =
+  | {
+      enabled: false;
+      mode: "disabled";
+      message: string;
+    }
+  | {
+      enabled: true;
+      mode: "chain";
+      walletAddress: string;
+      tokenAddress: string;
+      tokenSymbol: "XSGD";
+      tokenDecimals: number;
+      chainId: number;
+      networkName: string;
+      rpcUrl: string;
+      explorerUrl: string;
+      requiredConfirmations: number;
+    };
+
+export interface WalletFundingSnapshot {
+  configuration: FundingConfiguration;
+  deposits: WalletDeposit[];
+}
+
+export interface WalletDepositResult {
+  deposit: WalletDeposit;
+  wallet: Wallet;
 }
 
 export interface Mandate {

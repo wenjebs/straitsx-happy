@@ -26,3 +26,11 @@ output "dynamodb_table" {
 output "backend_health_url" {
   value = "https://${aws_cloudfront_distribution.app.domain_name}/v1/health"
 }
+
+output "cognito_user_pool_id" {
+  value = aws_cognito_user_pool.happy.id
+}
+
+output "cognito_web_client_id" {
+  value = aws_cognito_user_pool_client.happy_web.id
+}

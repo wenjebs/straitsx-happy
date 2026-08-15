@@ -1,0 +1,273 @@
+name: Deploy to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment and Terraform environment to deploy
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: happy-aws-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Verify and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY || format('happy/{0}/terraform.tfstate', inputs.environment) }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_project_name: ${{ vars.TF_PROJECT_NAME || 'happy' }}
+      TF_VAR_environment: ${{ inputs.environment }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+      TF_VAR_openai_model: ${{ vars.OPENAI_MODEL || 'gpt-5.6-luna' }}
+      TF_VAR_agent_api_base_url: ${{ vars.AGENT_API_BASE_URL || '' }}
+      TF_VAR_card_api_base_url: ${{ vars.CARD_API_BASE_URL || '' }}
+      TF_VAR_purchase_agent_api_base_url: ${{ vars.PURCHASE_AGENT_API_BASE_URL || '' }}
+      TF_VAR_funding_mode: ${{ vars.FUNDING_MODE || 'disabled' }}
+      TF_VAR_happy_wallet_address: ${{ vars.HAPPY_WALLET_ADDRESS || '' }}
+      TF_VAR_funding_chain_id: ${{ vars.FUNDING_CHAIN_ID || '43113' }}
+      TF_VAR_funding_rpc_url: ${{ vars.FUNDING_RPC_URL || 'https://api.avax-test.network/ext/bc/C/rpc' }}
+      TF_VAR_xsgd_address: ${{ vars.XSGD_ADDRESS || '0xd769410dc8772695a7f55a304d2125320a65c2a5' }}
+      TF_VAR_funding_network_name: ${{ vars.FUNDING_NETWORK_NAME || 'Avalanche Fuji C-Chain' }}
+      TF_VAR_funding_explorer_url: ${{ vars.FUNDING_EXPLORER_URL || 'https://subnets-test.avax.network/c-chain' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6.0.8
+        with:
+          cache: true
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6.5.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.14.6"
+          terraform_wrapper: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck workspace
+        run: pnpm -r typecheck
+
+      - name: Test deployed application packages
+        run: pnpm --filter @happy/shared --filter @happy/backend --filter @happy/frontend test
+
+      - name: Validate Terraform
+        run: |
+          terraform -chdir=terraform fmt -check -recursive
+          terraform -chdir=terraform init -backend=false
+          terraform -chdir=terraform validate
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: happy-${{ github.run_id }}
+
+      - name: Prepare protected Terraform state bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$TF_STATE_BUCKET" ]]; then
+            echo "Set the TF_STATE_BUCKET variable in the selected GitHub Environment." >&2
+            exit 1
+          fi
+
+          if ! aws s3api head-bucket --bucket "$TF_STATE_BUCKET" 2>/dev/null; then
+            if [[ "$AWS_REGION" == "us-east-1" ]]; then
+              aws s3api create-bucket --bucket "$TF_STATE_BUCKET" --region "$AWS_REGION"
+            else
+              aws s3api create-bucket \
+                --bucket "$TF_STATE_BUCKET" \
+                --region "$AWS_REGION" \
+                --create-bucket-configuration "LocationConstraint=$AWS_REGION"
+            fi
+          fi
+
+          aws s3api put-public-access-block \
+            --bucket "$TF_STATE_BUCKET" \
+            --public-access-block-configuration \
+              'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'
+          aws s3api put-bucket-versioning \
+            --bucket "$TF_STATE_BUCKET" \
+            --versioning-configuration Status=Enabled
+          aws s3api put-bucket-encryption \
+            --bucket "$TF_STATE_BUCKET" \
+            --server-side-encryption-configuration \
+              '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+      - name: Initialize remote Terraform state
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=terraform init -reconfigure \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=$TF_STATE_KEY" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Bootstrap ECR and Secrets Manager
+        id: infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=terraform apply -auto-approve \
+            -var="deploy_backend=false" \
+            -var="backend_image=" \
+            -target=aws_ecr_repository.backend \
+            -target=aws_ecr_lifecycle_policy.backend \
+            -target=aws_secretsmanager_secret.backend
+          echo "repository=$(terraform -chdir=terraform output -raw backend_ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "secret_arn=$(terraform -chdir=terraform output -raw backend_secret_arn)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish backend secrets to AWS
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+          AGENT_CALLBACK_TOKEN: ${{ secrets.AGENT_CALLBACK_TOKEN }}
+          CARD_API_TOKEN: ${{ secrets.CARD_API_TOKEN }}
+          PURCHASE_AGENT_API_TOKEN: ${{ secrets.PURCHASE_AGENT_API_TOKEN }}
+          PURCHASE_CALLBACK_TOKEN: ${{ secrets.PURCHASE_CALLBACK_TOKEN }}
+          WALLET_AUTH_SECRET: ${{ secrets.WALLET_AUTH_SECRET }}
+          BACKEND_SECRET_ARN: ${{ steps.infrastructure.outputs.secret_arn }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo "Set the OPENAI_API_KEY GitHub Environment secret." >&2
+            exit 1
+          fi
+          if (( ${#AGENT_CALLBACK_TOKEN} < 32 )); then
+            echo "AGENT_CALLBACK_TOKEN must be a stable random secret of at least 32 characters." >&2
+            exit 1
+          fi
+          if [[ "$TF_VAR_funding_mode" == "chain" && ${#WALLET_AUTH_SECRET} -lt 32 ]]; then
+            echo "WALLET_AUTH_SECRET must be at least 32 characters when FUNDING_MODE=chain." >&2
+            exit 1
+          fi
+          if [[ -n "$TF_VAR_purchase_agent_api_base_url" && -z "$PURCHASE_CALLBACK_TOKEN" ]]; then
+            echo "PURCHASE_CALLBACK_TOKEN is required when PURCHASE_AGENT_API_BASE_URL is set." >&2
+            exit 1
+          fi
+
+          secret_file="$RUNNER_TEMP/happy-backend-secrets.json"
+          trap 'rm -f "$secret_file"' EXIT
+          umask 077
+          jq -n \
+            --arg openai "$OPENAI_API_KEY" \
+            --arg agent_api "$AGENT_API_TOKEN" \
+            --arg agent_callback "$AGENT_CALLBACK_TOKEN" \
+            --arg card_api "$CARD_API_TOKEN" \
+            --arg purchase_api "$PURCHASE_AGENT_API_TOKEN" \
+            --arg purchase_callback "$PURCHASE_CALLBACK_TOKEN" \
+            --arg wallet_auth "$WALLET_AUTH_SECRET" \
+            '{
+              OPENAI_API_KEY: $openai,
+              AGENT_API_TOKEN: $agent_api,
+              AGENT_CALLBACK_TOKEN: $agent_callback,
+              CARD_API_TOKEN: $card_api,
+              PURCHASE_AGENT_API_TOKEN: $purchase_api,
+              PURCHASE_CALLBACK_TOKEN: $purchase_callback,
+              WALLET_AUTH_SECRET: $wallet_auth
+            }' > "$secret_file"
+          aws secretsmanager put-secret-value \
+            --secret-id "$BACKEND_SECRET_ARN" \
+            --secret-string "file://$secret_file" >/dev/null
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2.1.6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+
+      - name: Build and push backend image
+        id: backend_image
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.infrastructure.outputs.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Apply application infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_uri="${{ steps.infrastructure.outputs.repository }}@${{ steps.backend_image.outputs.digest }}"
+          terraform -chdir=terraform apply -auto-approve \
+            -var="deploy_backend=true" \
+            -var="backend_image=$image_uri"
+
+      - name: Build and upload frontend
+        id: deploy_frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_url="$(terraform -chdir=terraform output -raw app_url)"
+          bucket="$(terraform -chdir=terraform output -raw frontend_bucket)"
+          distribution="$(terraform -chdir=terraform output -raw cloudfront_distribution_id)"
+
+          VITE_API_BASE_URL="$app_url" pnpm --filter @happy/frontend build
+          aws s3 sync frontend/dist "s3://$bucket" \
+            --delete \
+            --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp frontend/dist/index.html "s3://$bucket/index.html" \
+            --content-type "text/html; charset=utf-8" \
+            --cache-control "no-cache"
+          aws cloudfront create-invalidation \
+            --distribution-id "$distribution" \
+            --paths "/*" >/dev/null
+
+          echo "app_url=$app_url" >> "$GITHUB_OUTPUT"
+          echo "health_url=$(terraform -chdir=terraform output -raw backend_health_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deployed backend
+        env:
+          HEALTH_URL: ${{ steps.deploy_frontend.outputs.health_url }}
+        run: |
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 10 --retry-all-errors \
+            "$HEALTH_URL"
+
+      - name: Write deployment summary
+        env:
+          APP_URL: ${{ steps.deploy_frontend.outputs.app_url }}
+          HEALTH_URL: ${{ steps.deploy_frontend.outputs.health_url }}
+        run: |
+          {
+            echo "### Happy deployed to AWS"
+            echo
+            echo "- App: [$APP_URL]($APP_URL)"
+            echo "- Health: [$HEALTH_URL]($HEALTH_URL)"
+            echo "- Backend image: \`${{ steps.infrastructure.outputs.repository }}@${{ steps.backend_image.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,10 +1,38 @@
 import { z } from "zod";
 
+const Email = z
+  .email()
+  .max(254)
+  .transform((value) => value.trim().toLowerCase());
+const Password = z.string().min(8).max(128);
+
+export const SignupBody = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: Email,
+  password: Password,
+});
+export const ConfirmSignupBody = z.object({
+  email: Email,
+  code: z.string().trim().min(4).max(12),
+});
+export const LoginBody = z.object({ email: Email, password: Password });
+export const RefreshSessionBody = z.object({ refreshToken: z.string().min(20).max(10000) });
+
 export const CreateActivityBody = z.object({ goal: z.string().trim().min(1).max(4000) });
 export const AddWishlistItemBody = z.object({ name: z.string().trim().min(1).max(160) });
 export const ChooseOptionBody = z.object({ option: z.string().trim().min(1).max(240) });
 export const PurchaseBody = z.object({ idempotencyKey: z.string().trim().min(8).max(240) });
-export const TopUpBody = z.object({ amountMinor: z.number().int().positive().max(100_000_000) });
+export const WalletDepositBody = z.object({
+  txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be a 32-byte transaction hash"),
+  sourceAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/, "must be an EVM address"),
+});
+export const WalletAuthChallengeBody = z.object({
+  address: z.string().regex(/^0x[0-9a-fA-F]{40}$/, "must be an EVM address"),
+});
+export const WalletAuthVerifyBody = z.object({
+  challengeToken: z.string().min(20).max(2000),
+  signature: z.string().regex(/^0x[0-9a-fA-F]+$/, "must be a hexadecimal signature"),
+});
 
 const CategoryRule = z.enum(["allowed", "ask first", "blocked"]);
 export const MandatePatch = z

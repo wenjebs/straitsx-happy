@@ -151,7 +151,7 @@ export interface HappyActions {
   cancelPurchase: () => void;
   /** The only call that spends. Never retried. */
   confirmPurchase: () => Promise<void>;
-  topUp: () => Promise<void>;
+  setWallet: (wallet: Api.Wallet) => void;
   setMandate: (changes: Partial<Api.Mandate>) => Promise<void>;
   setSetting: (key: "notify" | "sandbox") => Promise<void>;
   goScreen: (screen: Screen) => void;
@@ -426,7 +426,7 @@ export function useHappy(): Happy {
         }
       },
 
-      topUp: () => guard(async () => set({ wallet: await Api.topUpWallet(50000), error: null })),
+      setWallet: (wallet) => set({ wallet, error: null }),
 
       setMandate: (changes) =>
         guard(async () => set({ mandate: await Api.updateMandate(changes), error: null })),

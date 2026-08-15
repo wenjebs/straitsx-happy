@@ -36,18 +36,29 @@ The browser calls the API cross-origin. Allow the frontend's origin
 ```
 Access-Control-Allow-Origin: http://localhost:4040
 Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
-Access-Control-Allow-Headers: content-type
+Access-Control-Allow-Headers: content-type, authorization, x-happy-wallet-session
 ```
 
 `Access-Control-Allow-Origin: *` also works while there are no credentials.
 
 ### Auth
 
-None today. `authHeaders()` in `Api.ts` is the single seam where it gets added.
+Happy uses email/password account sessions. Local mode issues an HMAC-protected token; AWS uses
+Cognito with email confirmation. The browser sends the account token as `Authorization: Bearer
+<token>` for every protected route. The activity stream uses authenticated `fetch()` streaming,
+not native `EventSource`, so tokens never appear in URLs.
 
-If you add auth, note that **`EventSource` cannot send custom headers**, so a
-`Authorization: Bearer` scheme will not work for the SSE stream. Use a cookie, or
-accept a token as a query parameter on the events endpoint.
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/v1/auth/signup` | `{ name, email, password }` | `SignupResult` |
+| `POST` | `/v1/auth/confirm` | `{ email, code }` | `204` |
+| `POST` | `/v1/auth/login` | `{ email, password }` | `AuthSession` |
+| `POST` | `/v1/auth/refresh` | `{ refreshToken }` | `AuthSession` |
+| `GET` | `/v1/auth/me` | — | `AuthUser` |
+| `POST` | `/v1/auth/logout` | — | `204` |
+
+Health and the first four auth routes are public. Agent/purchase callbacks use their own service
+tokens. Every other browser route is account-authenticated and account-scoped.
 
 ---
 
@@ -257,7 +268,11 @@ immutable full documents from `/checkpoints` to reconstruct chat through buy.
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | `GET` | `/v1/wallet` | — | `Wallet` |
-| `POST` | `/v1/wallet/topup` | `{ "amountMinor": number }` | `Wallet` |
+| `POST` | `/v1/wallet/auth/challenge` | `{ "address": string }` | `{ challengeToken, message, expiresAt }` |
+| `POST` | `/v1/wallet/auth/verify` | `{ "challengeToken": string, "signature": string }` | `{ sessionToken, address, expiresAt }` |
+| `GET` | `/v1/wallet/funding` | — | `WalletFundingSnapshot` |
+| `POST` | `/v1/wallet/deposits` | `{ "txHash": string, "sourceAddress": string }` | `WalletDepositResult` |
+| `GET` | `/v1/wallet/deposits/:txHash` | — | `WalletDepositResult` |
 | `GET` | `/v1/mandate` | — | `Mandate` |
 | `PATCH` | `/v1/mandate` | `Partial<Mandate>` | `Mandate` |
 | `GET` | `/v1/settings` | — | `Settings` |
@@ -282,6 +297,25 @@ immutable full documents from `/checkpoints` to reconstruct chat through buy.
 ```
 
 Card `status` follows the lifecycle `issued → viewed → used → expired`.
+
+The funding snapshot returns either `{ enabled: false, mode: "disabled", message }` or the
+enabled chain configuration: Happy's shared wallet address, XSGD token address/decimals, chain id,
+network name, public RPC/explorer URLs, and required confirmations. It also includes durable
+deposit rows with `pending | confirmed | failed` status, transaction/source/destination/token,
+atomic and minor-unit amounts, confirmations, block number, failure reason, and timestamps.
+
+`POST /v1/wallet/deposits` must never trust an amount supplied by the browser. Derive the credit
+from the confirmed XSGD `Transfer` log, require the configured chain/token/destination and the
+submitted source address, and credit each transaction hash at most once. Return `202` while
+pending and `201` when confirmed. Refreshing or resubmitting an already confirmed hash is
+idempotent and must not increase the balance again.
+
+The challenge message must say that it proves wallet ownership and does not authorize spending.
+The challenge and returned wallet session are bound to the logged-in account. The account session
+stays in `Authorization`; after wallet verification the client sends the wallet session as
+`X-Happy-Wallet-Session`. Deposit creation and refresh require both sessions, the account IDs must
+match, and the submitted `sourceAddress` must match the wallet proof. Wallet/funding reads use the
+account identity even before a wallet is connected.
 
 ```jsonc
 // Mandate — caps are whole SGD, matching the slider units, not minor

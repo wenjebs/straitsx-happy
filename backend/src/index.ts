@@ -22,6 +22,7 @@ import {
   LocalCardProvider,
   RemoteCardProvider,
 } from "./providers/card.js";
+import { ChainFundingProvider, DisabledFundingProvider } from "./providers/funding.js";
 import { OpenAIPlannerProvider } from "./providers/openaiPlanner.js";
 import {
   DisabledPurchaseAgentProvider,
@@ -34,7 +35,15 @@ import { DynamoRepository } from "./repositories/dynamodb.js";
 import { MemoryRepository } from "./repositories/memory.js";
 import type { Repository } from "./repository.js";
 import { ActivityService } from "./services/activities.js";
+import {
+  type AuthService,
+  CognitoAuthService,
+  DisabledAuthService,
+  LocalAuthService,
+} from "./services/auth.js";
 import { PurchaseService } from "./services/purchases.js";
+import { WalletAuthService } from "./services/walletAuth.js";
+import { WalletFundingService } from "./services/walletFunding.js";
 import { FrameHub } from "./streams.js";
 
 const config = loadConfig();
@@ -100,8 +109,27 @@ const purchaseAgents: PurchaseAgentProvider =
             : {}),
         })
       : new DisabledPurchaseAgentProvider();
+const fundingProvider =
+  config.FUNDING_MODE === "chain" &&
+  config.HAPPY_WALLET_ADDRESS &&
+  config.RPC_URL &&
+  config.XSGD_ADDRESS
+    ? new ChainFundingProvider({
+        walletAddress: config.HAPPY_WALLET_ADDRESS,
+        tokenAddress: config.XSGD_ADDRESS,
+        tokenDecimals: config.XSGD_DECIMALS,
+        chainId: config.CHAIN_ID,
+        networkName: config.FUNDING_NETWORK_NAME,
+        rpcUrl: config.RPC_URL,
+        explorerUrl: config.FUNDING_EXPLORER_URL,
+        requiredConfirmations: config.DEPOSIT_CONFIRMATIONS,
+      })
+    : new DisabledFundingProvider();
 const activities = new ActivityService(repository, events, planner, scouts, resolveWikimediaImage);
 const purchases = new PurchaseService(repository, events, cards, purchaseAgents, config);
+const funding = new WalletFundingService(repository, fundingProvider);
+const walletAuth = new WalletAuthService(config.WALLET_AUTH_SECRET);
+const auth = createAuthService();
 const app = createApp({
   config,
   repository,
@@ -112,12 +140,15 @@ const app = createApp({
   purchaseAgents,
   activities,
   purchases,
+  funding,
+  walletAuth,
+  auth,
   frames,
 });
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, ({ port }) => {
   console.log(
-    `happy-backend http://127.0.0.1:${port} store=${config.DATA_STORE} planner=${planner.mode} scouts=${scouts.mode} cards=${cards.mode} closer=${purchaseAgents.mode}`,
+    `happy-backend http://127.0.0.1:${port} store=${config.DATA_STORE} auth=${auth.mode} planner=${planner.mode} scouts=${scouts.mode} cards=${cards.mode} closer=${purchaseAgents.mode} funding=${fundingProvider.mode}`,
   );
 });
 
@@ -166,4 +197,20 @@ function createRepository(): Repository {
     region: config.AWS_REGION,
     ...(config.DYNAMODB_ENDPOINT ? { endpoint: config.DYNAMODB_ENDPOINT } : {}),
   });
+}
+
+function createAuthService(): AuthService {
+  if (config.AUTH_MODE === "disabled") return new DisabledAuthService();
+  if (config.AUTH_MODE === "local") {
+    if (!config.AUTH_SESSION_SECRET) throw new Error("AUTH_SESSION_SECRET is required");
+    return new LocalAuthService(config.AUTH_SESSION_SECRET);
+  }
+  if (!config.COGNITO_USER_POOL_ID || !config.COGNITO_CLIENT_ID) {
+    throw new Error("Cognito configuration is required when AUTH_MODE=cognito");
+  }
+  return new CognitoAuthService(
+    config.COGNITO_USER_POOL_ID,
+    config.COGNITO_CLIENT_ID,
+    config.AWS_REGION,
+  );
 }

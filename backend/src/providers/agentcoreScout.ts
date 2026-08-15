@@ -2,6 +2,7 @@ import type { Activity, ShortlistPick, StageIndex, WishlistItem } from "../domai
 import { merchantById, merchantsForSlot, type VerifiedMerchant } from "../merchants.js";
 import type { ScoutProvider } from "./agent.js";
 import type { AgentCoreBrowser, BrowserSession } from "./agentcoreBrowser.js";
+import { catalogueFallback } from "./fallbackShortlist.js";
 import { type ScoutBrain, type ScoutDecision, type ScoutPick, titleScore } from "./scoutBrain.js";
 import { openProduct, searchStore } from "./storefront.js";
 
@@ -126,12 +127,23 @@ export class AgentCoreScoutProvider implements ScoutProvider {
     if (signal.aborted) return;
 
     const shortlist: ShortlistPick[] = [];
+    // Shared across the wishlist so two items never get proposed the same product.
+    const used = new Set<string>();
     for (const item of items) {
       const decisions = results
         .filter((result) => result?.itemId === item.id && result.decision)
         .map((result) => (result as SlotResult).decision as ScoutDecision);
       const merged = mergeDecisions(item, decisions);
-      if (merged) shortlist.push({ itemId: item.id, ...merged });
+      if (merged) {
+        used.add(merged.listing.url ?? merged.listing.title);
+        shortlist.push({ itemId: item.id, ...merged });
+        continue;
+      }
+      // Live scouting found nothing for this item — the shop was down, challenged, or genuinely
+      // does not stock it. Fall back to the crawled catalogue so the item is still answered with a
+      // real product at a real URL, rather than vanishing from the shortlist.
+      const fallback = catalogueFallback(item, { used });
+      if (fallback) shortlist.push({ itemId: item.id, ...fallback });
     }
 
     if (shortlist.length === 0) {

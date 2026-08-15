@@ -29,3 +29,25 @@
   flex-direction: column;
   overflow: hidden;
 }
+.authLoading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.authLoading span {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: currentColor;
+  animation: h-shimmer 1s ease-in-out infinite;
+}
+
+.authLoading strong {
+  font-size: 15px;
+  font-weight: 600;
+}
