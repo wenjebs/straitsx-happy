@@ -11,6 +11,7 @@ import type { ActivityStage } from "./lib/Api";
 import { isLive } from "./lib/Api";
 import { ActivityHistoryScreen } from "./screens/ActivityHistoryScreen";
 import { ArchiveScreen } from "./screens/ArchiveScreen";
+import { BrowserTestScreen } from "./screens/BrowserTestScreen";
 import { ChatScreen } from "./screens/ChatScreen";
 import { ExecutionScreen } from "./screens/ExecutionScreen";
 import { LoginScreen } from "./screens/LoginScreen";
@@ -38,6 +39,7 @@ const SCREEN_TITLE = {
   mandate: "Mandate",
   settings: "Settings",
   profile: "Profile",
+  browsertest: "Browser test",
 } as const;
 
 export function App() {
@@ -202,6 +204,7 @@ function AuthenticatedApp({
             {state.screen === "profile" && (
               <ProfileScreen profile={state.profile} onSignOut={() => void onLogout()} />
             )}
+            {state.screen === "browsertest" && <BrowserTestScreen />}
           </section>
 
           {onPurchase && state.focused === null && (

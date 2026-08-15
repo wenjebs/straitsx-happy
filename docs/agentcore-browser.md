@@ -80,6 +80,295 @@ Raised with its owner; not changed here.
    brand new. Looking automated *manufactures* the challenge that kills the card.
    `pressSequentially` with a delay costs about four seconds of a ten-minute TTL.
 
+## Smoke test 3 answered — CDP does reach cross-origin card fields (16 Aug, no AWS, no money)
+
+`packages/closer/probe/cdp-iframe.ts`. Playwright's "significantly lower fidelity" warning does
+not cost us the thing we depend on.
+
+The probe does not use `apps/demo-store`'s `/checkout-framed`, because that iframe is
+**same-origin** and therefore shares its parent's renderer — it cannot exercise the risk. The risk
+is specifically Chromium's out-of-process iframes, which appear only across a site boundary. So the
+probe serves the outer page from `localhost` and the card frame from `127.0.0.1` — different sites
+to Chromium — under `--site-per-process`, then connects with `connectOverCDP` exactly as the
+AgentCore adapter will.
+
+| Result | Value |
+|---|---|
+| `browser.contexts().length` | `1` — the default context is there to `newPage()` on |
+| `page.frames()` | `2`, child at `http://127.0.0.1:4032/card-frame` |
+| Frame really out-of-process | `true` (`contentDocument === null` from the parent) |
+| `fillFirst` found the field | `true` |
+| `pressSequentially` digits landed | `true` — 16 read back **from inside the frame** |
+| `navigator.webdriver` | `true` |
+| UA | `HeadlessChrome/151.0.7922.34` (local launch; AgentCore's will differ) |
+
+**So `payWithCard` needs no change to run over AgentCore.** The transport differs — AgentCore wraps
+CDP in a SigV4-signed websocket — but the protocol, and therefore frame fidelity, is identical.
+
+Two caveats this does not settle, both needing real credentials: whether AgentCore's own Chrome
+sets `navigator.webdriver` (locally it is Playwright that sets it), and whether the SigV4 websocket
+adds latency that matters against a ten-minute card TTL.
+
+## Both `packages/pay` defects are already fixed (verified 16 Aug)
+
+Re-checked before building on them, since the plan called the human-takeover path unreachable
+until they landed:
+
+1. **No top-level-navigation wait.** `checkout.ts` has no `waitForNavigation`/`waitForURL`; the
+   comment at line 145 names the stranded-card failure explicitly and `confirm()` runs against the
+   live page (line 181).
+2. **`pressSequentially`, not `fill()`** — line 82, with the fraud-signal reasoning in the comment.
+
+The human-takeover path is reachable. Build on it.
+
+## Measured against the live rail, 16 Aug — account 227493789621, ap-southeast-1
+
+All of it with `ISSUER=mock`, no card, no money. Three sessions, well under a cent.
+
+### The session layer works
+
+`aws.browser.v1` is `READY` in Singapore. `StartBrowserSession` returns both endpoints exactly as
+the investigation predicted. `connectOverCDP` accepts the automation websocket when handed SigV4
+headers signed for service `bedrock-agentcore` — Playwright's `headers` option is the whole hook,
+and nothing below the transport changes. `browser.contexts()` is length 1, so `newPage()` on the
+default context works without ever calling `browser.newContext()`.
+
+### The decision test is answered, and the answer is yes
+
+**`UpdateBrowserStream` with `streamStatus=DISABLED` DOES tear down an already-open CDP socket.**
+The `Page` dies immediately — `browser.isConnected()` goes `false` within three seconds, and the
+next call throws `Target page, context or browser has been closed`.
+
+That is the feared answer. But it is survivable, which the doc did not know:
+
+| After DISABLED → ENABLED → `reconnect()` | Result |
+|---|---|
+| Fresh `connectOverCDP` succeeds | yes |
+| The parked tab is still there | yes — found by URL |
+| `document.title` set before the handoff | preserved |
+| `sessionStorage` | preserved |
+| Cookies | preserved |
+| Page drivable again (`goto`) | yes |
+
+**So the recommendation changes.** The doc said "do not call DISABLED at all". Measurement says
+call it, and reconnect afterwards:
+
+```
+submit → challenge detected → setAutomationEnabled(false) → mint live view →
+human clears 3DS → operator signals done → setAutomationEnabled(true) →
+reconnect() → find the tab by URL → confirm()
+```
+
+This is strictly better than idling with automation enabled, because the agent is genuinely locked
+out while a human has the keyboard — no two parties fighting over the same form. The cost is that
+the agent cannot poll during the handoff, so the "done" signal has to come from the operator.
+
+One wrinkle worth knowing: after reconnect, `pages()` also contains `chrome://new-tab-page/`.
+Select the working tab by URL, never by index.
+
+### Egress and fingerprint
+
+| | |
+|---|---|
+| Egress IP | `54.179.94.175` |
+| Country / region | **SG / Singapore** — so Radar's `Block if :card_country: != :ip_country:` does not fire |
+| Org | `AS16509 Amazon.com, Inc.` — datacentre, publicly listed, as expected |
+| `navigator.webdriver` | **`false`** — AgentCore does not set it (locally it is Playwright that does) |
+
+### The fingerprint problem nobody predicted: the User-Agent self-identifies
+
+```
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0
+Amazon-Bedrock-AgentCore-Browser/1.0 (Chromium; +https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/browser-tool.html)
+```
+
+AgentCore appends its own product token, with a documentation URL. This is a **worse** signal than
+either the datacentre IP or `navigator.webdriver`, because the UA is read at the CDN and WAF layer
+before a line of page JS runs — Cloudflare, Akamai and Stripe Radar all see it on the very first
+request. Any merchant that cares is now told, in plain text, that this is an AWS agent browser.
+
+It is also, read another way, AWS behaving honestly: the token is there so sites *can* identify
+automated traffic. Overriding it via `Emulation.setUserAgentOverride` is technically one CDP call
+and is deliberately **not** implemented here — that is concealment from a site that has chosen to
+look, and it is wenjie's call, not the library's default.
+
+### Cross-origin iframes, over the real transport
+
+Repeating `probe/cdp-iframe.ts`'s question through the SigV4 websocket: child frame seen, genuinely
+out-of-process (`contentDocument === null` from the parent), reachable, `frame.title()` read
+successfully. `payWithCard`'s `page.frames()` works over AgentCore.
+
+### The decisive test: a real Shopify checkout, end to end, over AgentCore
+
+Nylon Coffee Roasters (`nylon.coffee`), chosen from `docs/merchant-shortlist.md` as the cleanest
+Shopify Payments setup found. Driven entirely through the AgentCore CDP connection: storefront →
+quick add → cart (Kenya AB Kiamwangi, S$23.50, inside the S$5–30 card bounds) → checkout.
+
+Nothing was submitted, no card was minted, no money moved. The PAN below is the well-known junk
+test number.
+
+| | |
+|---|---|
+| Reached the real checkout | yes — `nylon.coffee/checkouts/cn/…`, no bot wall |
+| Frames on the payment page | **11** |
+| Card-field host | `checkout.pci.shopifyinc.com` — a genuine cross-origin PCI iframe |
+| `number` / `expiry` / `cvc` / `name` | **all four found**, all inside that iframe, by our existing `SELECTORS` |
+| `pressSequentially` into the iframe | **worked** — Shopify formatted it to `4242 4242 4242 4242` and detected Visa |
+| Total read from the page | SGD $23.50, "Including $1.94 in taxes" |
+
+**This is `payWithCard` proven against a real merchant over AgentCore, with no code change.** The
+`connectOverCDP` fidelity question, the OOPIF question and the "does typing reach the gateway"
+question are now all answered on the real thing rather than a local stand-in.
+
+### Auth persists across sessions — browser profiles work
+
+The original investigation missed this, and it is the most useful thing found since. A **browser
+profile** carries cookies and local storage from one session into the next, so a human can log in
+once through the live view and every later session starts authenticated — with the password never
+touching the agent or a model prompt.
+
+Verified end to end by `probe/agentcore-profile.ts`: session A sets a cookie → save → session A
+dies → session B starts *with* the profile → the cookie is there. Against Shopee, session B came up
+carrying **16 cookies**, 15 of them Shopee's own from the previous session.
+
+The mechanics are not obvious and cost an hour, so they are worth writing down:
+
+| | |
+|---|---|
+| Create | `CreateBrowserProfile` — on the **control** plane (`@aws-sdk/client-bedrock-agentcore-control`), not the data plane |
+| Name constraint | `[a-zA-Z][a-zA-Z0-9_]{0,47}` — **underscores, no hyphens**. AWS appends its own `-XXXXXXXXXX` suffix to form the identifier |
+| Save | `SaveBrowserSessionProfile` — data plane. Does **not** create: an unknown identifier answers `ResourceNotFoundException` |
+| List | `ListBrowserProfiles` → `profileSummaries` (not `browserProfileSummaries`), each with `profileId`, `status`, `lastSavedAt` |
+| Use | `StartBrowserSession({ profileConfiguration: { profileIdentifier } })` |
+| IAM | `SaveBrowserSessionProfile` on the data plane; `CreateBrowserProfile` / `GetBrowserProfile` / `ListBrowserProfiles` / `UpdateBrowserProfile` / `DeleteBrowserProfile` on the control plane |
+
+**Gotcha:** `SaveBrowserSessionProfile` intermittently answers `AccessDeniedException` even with the
+policy attached and the profile `READY` — observed succeeding twice, failing once, then succeeding
+again within four minutes. It appears to be a throttle or a post-save cooldown misreported as an
+authorisation failure. Retry before believing it.
+
+**It does not defeat Shopee.** A profile-backed session still lands on `/verify/traffic/error` with
+`is_logged_in=false`. The block is applied to the datacentre IP on the homepage, before a login
+form is ever reachable, so "log in once and reuse the profile" cannot rescue it. The lever for that
+case is `proxyConfiguration` on `StartBrowserSession`, which routes through a proxy you supply —
+untested, and a separate experiment.
+
+Where profiles *do* pay off is every merchant that admits us but wants an account, and any flow
+where a human clears a captcha once and later runs should not face it again.
+
+### A methodology note: never read the URL at `domcontentloaded`
+
+A bot bounce is a redirect that lands *after* `domcontentloaded`. Reading `page.url()` at that point
+reports the URL you asked for rather than the one you got, which turns a block into a false pass —
+this probe reported Shopee as reachable twice before the settle wait was added. Every merchant
+verdict in this document waits and re-reads.
+
+### Shopee blocks the automation, not the IP — so nothing we can buy fixes it
+
+Worth stating loudly, because three separate ideas were spent on it before this was measured.
+
+`probe/shopee-prices.ts` loads three Shopee product URLs from a **local Playwright browser on a
+residential Singapore connection** — not AWS. All three bounce to
+`/verify/traffic/error?…&is_logged_in=false`, exactly as they do from AgentCore.
+
+The page titles come back before the bounce, so the product page begins to load and is then
+refused. The same URLs open normally in a hand-driven browser on the same machine and the same
+connection.
+
+**So the judgement is on the automation, not the network.** That rules out, in one measurement:
+
+| Idea | Why it cannot work |
+|---|---|
+| Use AgentCore | Already blocked |
+| Use a local browser instead | Blocked too — same IP as a working manual session |
+| `proxyConfiguration`, or a residential proxy | The IP is not what is being judged |
+| Human takeover in the live view | There is no challenge to clear, only a dead end |
+
+The one lever left is a **logged-in browser profile**: the bounce carries `is_logged_in=false`, and
+`CreateBrowserProfile` + `SaveBrowserSessionProfile` are verified working. A human logs into Shopee
+once through the live view, the profile is saved, and later sessions start authenticated. Untested
+against Shopee, and it is the only remaining idea that is not already disproven.
+
+Otherwise Shopee is out, and a merchant that admits automation — Nylon Coffee reaches a real
+Shopify card form — is the shorter path to a demo that works.
+
+### Checkout traps found on real Singapore shops
+
+Reconnaissance across eight storefronts turned up three things that break a purchase, two of them
+silently. All measured on live checkouts.
+
+**1. Six frames claim to hold the card number, and five are decoys.**
+
+Shopify ships the SAME eight-input form into every one of its field iframes and shows exactly one
+per frame. On a live checkout `input[autocomplete="cc-number"]` matches in **six** frames. The
+seven decoys in each are not hidden: they are shrunk to about 2×2px with `visibility: visible`, so
+Playwright's `isVisible()` returns **true** for all of them.
+
+A first-match locator therefore types the card number into a 2px field inside `expiry-ltr.html`
+roughly five times in six. Nothing throws. The checkout just fails with an empty card number, on a
+single-use card already minted with ten minutes to live. Our own filler had this bug and passed its
+live test on frame ordering rather than correctness.
+
+The fix is to require a field wide enough for a person to type into (≥60px). Frame URL —
+`number-ltr.html`, `expiry-ltr.html`, `verification_value-ltr.html` — is a useful preference, but
+size is what decides, because it holds on gateways that name frames differently.
+
+**2. Shipping is added after the price, and can push an order past the card ceiling.**
+
+Polypet gives free delivery over S$100, so every order in our S$5–30 band **has a shipping charge
+added after the item price**, quoted only once a postal code is entered. A S$18.90 toy plus
+shipping and tax can exceed the S$30 the card can mint.
+
+This matters more than it sounds: the card must be minted for the **final** total, not the listed
+price. Today Happy mints for `listing.amountMinor` and the Closer then refuses when the merchant's
+total exceeds it — which is safe, and which means the purchase correctly never completes. Closing
+that gap needs the shipping cost determined *before* issuance.
+
+**3. Two ways to pick the wrong payment method.**
+
+Polypet's checkout offers "HitPay - QR Code, E-wallets and Cards" and a method literally labelled
+**"For Internal Use (Do not select)"** alongside Credit card. An agent must keep the Credit card
+radio selected rather than take the first option.
+
+Also: "Use shipping address as billing address" is ticked by default. That is the wrong default if
+the StraitsX card carries a different billing address — still one of the open questions.
+
+**Bonus, on bot walls:** superpaws.sg served a Cloudflare Turnstile after repeated requests, absent
+on a cold visit, and cleared itself after roughly ten minutes idle. Volume triggers it, not
+identity — worth pacing rehearsals.
+
+### Merchants, measured rather than predicted
+
+Five merchants launched simultaneously through `demo/agentcore-server.ts`, plus earlier one-offs.
+The distinction that matters is **not** blocked/allowed — it is whether a human at the live view
+has anything to *do*. A captcha is survivable; a bounce is not.
+
+| Site | Result | Can a human rescue it? |
+|---|---|---|
+| **FairPrice** | **loads completely** — real storefront, live prices, no wall | not needed |
+| **Nylon Coffee** (Shopify) | **loads, all the way to the card form** | not needed |
+| `example.com`, `openstreetmap.org`, `ipinfo.io` | fine | — |
+| **Lazada** | **slider captcha** — "Please drag the slider to verify" | **yes** — drag it in the live view |
+| **Google search** | **reCAPTCHA** — `/sorry/index`, "unusual traffic from your computer network" | **yes** — cleared, session continued on real results with cookies intact |
+| **Shopee** | **hard bounce** → `/verify/traffic/error?…&is_logged_in=false`, "Page Unavailable" | **no** — nothing to solve |
+| **Amazon SG** | **soft bot block** → "Website Temporarily Unavailable" | **no** — nothing to solve |
+
+So the three-way split is: some merchants do not care, some throw a challenge that a human clears
+in seconds, and some refuse without offering a door. Only the third group is actually lost, and it
+is a minority — which is a much better result than "Shopee will probably bounce it" implied.
+
+Shopee and Amazon are the only true losses, and both were already ruled out by
+`docs/merchant-shortlist.md` for an unrelated reason: they require an account, and account creation
+needs a code sent to a phone.
+
+One hint before writing Shopee off entirely: its bounce URL carries `is_logged_in=false`, and the
+only action the page offers is **Log In**. An authenticated session may pass where an anonymous one
+does not — and the live view is exactly how an operator logs in without the password ever reaching
+the agent or a model prompt. Untested.
+
+Egress IPs rotate within AWS Singapore across sessions (`54.179.94.175`, then `18.143.40.65`), so
+there is no single address to get allowlisted, and a merchant cannot durably block one either.
+
 ## Guardrails — skip these and you leak the card or lose money
 
 - **Never create a custom browser with recording for the card leg.** Recording captures DOM
