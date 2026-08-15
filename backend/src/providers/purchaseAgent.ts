@@ -1,4 +1,4 @@
-import type { Listing, WishlistItem } from "../domain.js";
+import type { Listing, ShippingAddress, WishlistItem } from "../domain.js";
 import { HttpError } from "../errors.js";
 
 export interface CardGrant {
@@ -14,6 +14,7 @@ export interface PurchaseAgentRequest {
   attemptId: string;
   item: WishlistItem;
   listing: Listing;
+  shippingAddress: ShippingAddress;
   cardGrant: CardGrant;
   sandbox: boolean;
   idempotencyKey: string;

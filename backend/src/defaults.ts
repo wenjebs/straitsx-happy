@@ -33,6 +33,7 @@ export function defaultSettings(): Settings {
   return {
     region: "Singapore · SGD",
     dataRetention: "90 days",
+    shippingAddress: null,
   };
 }
 

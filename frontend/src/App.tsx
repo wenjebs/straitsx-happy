@@ -193,7 +193,12 @@ function AuthenticatedApp({
                 onChange={(changes) => void actions.setMandate(changes)}
               />
             )}
-            {state.screen === "settings" && <SettingsScreen settings={state.settings} />}
+            {state.screen === "settings" && (
+              <SettingsScreen
+                settings={state.settings}
+                onSaveAddress={(shippingAddress) => actions.setSettings({ shippingAddress })}
+              />
+            )}
             {state.screen === "profile" && (
               <ProfileScreen profile={state.profile} onSignOut={() => void onLogout()} />
             )}

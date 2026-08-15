@@ -355,6 +355,7 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     const settings = {
       region: patch.region ?? current.region,
       dataRetention: patch.dataRetention ?? current.dataRetention,
+      shippingAddress: patch.shippingAddress ?? current.shippingAddress,
     };
     await deps.repository.putSettings(userId, settings);
     return c.json(settings);

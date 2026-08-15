@@ -228,9 +228,21 @@ export interface Mandate {
   actCap: number;
 }
 
+export interface ShippingAddress {
+  recipientName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  stateOrProvince: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+}
+
 export interface Settings {
   region: string;
   dataRetention: string;
+  shippingAddress: ShippingAddress | null;
 }
 
 export interface Profile {

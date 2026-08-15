@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Activity } from "../domain.js";
+import type { Activity, ShippingAddress } from "../domain.js";
 import { DEFAULT_USER_ID } from "../domain.js";
 import { EventHub } from "../events.js";
 import type { CardProvider, IssueCardRequest, IssuedCard, TopUpResult } from "../providers/card.js";
@@ -39,6 +39,22 @@ class PurchaseAgents implements PurchaseAgentProvider {
   async cancelPurchase(request: PurchaseAgentCancelRequest): Promise<void> {
     this.cancellations.push(request);
   }
+}
+
+const shippingAddress: ShippingAddress = {
+  recipientName: "Test User",
+  addressLine1: "1 Happy Street",
+  addressLine2: "#02-03",
+  city: "Singapore",
+  stateOrProvince: "",
+  postalCode: "018956",
+  country: "Singapore",
+  phone: "+65 6123 4567",
+};
+
+async function configureDelivery(repository: MemoryRepository): Promise<void> {
+  const settings = await repository.getSettings(DEFAULT_USER_ID);
+  await repository.putSettings(DEFAULT_USER_ID, { ...settings, shippingAddress });
 }
 
 function activity(amountMinor: number): Activity {
@@ -126,6 +142,28 @@ async function waitForJob(agents: PurchaseAgents): Promise<PurchaseAgentRequest>
 }
 
 describe("PurchaseService", () => {
+  it("requires a saved delivery address before claiming a purchase", async () => {
+    const repository = new MemoryRepository();
+    const service = new PurchaseService(
+      repository,
+      new EventHub(),
+      new Cards(),
+      new PurchaseAgents(),
+      {
+        PUBLIC_BASE_URL: "http://localhost:8787",
+        PAYMENT_MIN_MINOR: 500,
+        PAYMENT_MAX_MINOR: 3000,
+        PAYMENT_ATTEMPTS_PER_LISTING: 2,
+      },
+    );
+    await repository.putActivity(activity(2500));
+
+    await expect(service.start("activity-1", "missing-address-key")).rejects.toThrow(
+      "delivery address in Settings",
+    );
+    expect(await repository.getPurchaseClaim("activity-1")).toBeNull();
+  });
+
   it("enforces the card rail before issuing and leaves a denied activity retryable", async () => {
     const repository = new MemoryRepository();
     const cards = new Cards();
@@ -136,6 +174,7 @@ describe("PurchaseService", () => {
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,
     });
+    await configureDelivery(repository);
     const expensive = activity(3100);
     await repository.putActivity(expensive);
 
@@ -176,9 +215,11 @@ describe("PurchaseService", () => {
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,
     });
+    await configureDelivery(repository);
     await repository.putActivity(activity(2500));
     await service.start("activity-1", "same-idempotency-key");
     await finishPurchase(service, agents);
+    expect(agents.requests[0]?.shippingAddress).toEqual(shippingAddress);
     await eventuallyCompleted(repository);
     const duplicate = await service.start("activity-1", "same-idempotency-key");
     expect(duplicate.status).toBe("completed");
@@ -195,6 +236,7 @@ describe("PurchaseService", () => {
       PAYMENT_MAX_MINOR: 3000,
       PAYMENT_ATTEMPTS_PER_LISTING: 2,
     });
+    await configureDelivery(repository);
     await repository.putActivity(activity(2500));
     await service.start("activity-1", "cancel-idempotency-key");
     const job = await waitForJob(agents);

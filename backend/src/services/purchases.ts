@@ -7,6 +7,8 @@ import type {
   LogLine,
   Mandate,
   PurchaseRun,
+  Settings,
+  ShippingAddress,
   Wallet,
   WishlistItem,
 } from "../domain.js";
@@ -50,10 +52,12 @@ export class PurchaseService {
       throw new HttpError(503, "The Closer purchase agent is not configured.");
     }
 
-    const [mandate, wallet] = await Promise.all([
+    const [mandate, settings, wallet] = await Promise.all([
       this.repository.getMandate(activity.userId),
+      this.repository.getSettings(activity.userId),
       this.repository.getWallet(activity.userId),
     ]);
+    this.requireShippingAddress(settings);
     this.assertMandate(activity, mandate, wallet);
 
     const claim = await this.repository.claimPurchase(activityId, idempotencyKey);
@@ -292,7 +296,11 @@ export class PurchaseService {
       this.repository.getPurchaseRun(activityId),
     ]);
     if (run?.status !== "running" || activity.status !== "live" || run.attemptId) return;
-    const mandate = await this.repository.getMandate(activity.userId);
+    const [mandate, settings] = await Promise.all([
+      this.repository.getMandate(activity.userId),
+      this.repository.getSettings(activity.userId),
+    ]);
+    const shippingAddress = this.requireShippingAddress(settings);
 
     while (run.itemIndex < activity.shortlist.length) {
       const pick = activity.shortlist[run.itemIndex];
@@ -342,6 +350,7 @@ export class PurchaseService {
           attemptId,
           item,
           listing,
+          shippingAddress,
           cardGrant: {
             claimUrl: `${this.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/v1/integrations/purchases/${encodeURIComponent(activityId)}/attempts/${encodeURIComponent(attemptId)}/card`,
             token: grantToken,
@@ -499,6 +508,16 @@ export class PurchaseService {
         `Payment rail denied ${item.name}: ${listing.price} is outside the issuable range ${formatMinor(this.config.PAYMENT_MIN_MINOR)}–${formatMinor(this.config.PAYMENT_MAX_MINOR)}.`,
       );
     }
+  }
+
+  private requireShippingAddress(settings: Settings): ShippingAddress {
+    if (!settings.shippingAddress) {
+      throw new HttpError(
+        422,
+        "Add and save a delivery address in Settings before starting a purchase.",
+      );
+    }
+    return settings.shippingAddress;
   }
 
   private async expireCurrentCard(run: PurchaseRun): Promise<void> {

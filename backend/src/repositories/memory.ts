@@ -140,6 +140,7 @@ export class MemoryRepository implements Repository {
     const current = {
       region: settings.region,
       dataRetention: settings.dataRetention,
+      shippingAddress: settings.shippingAddress ?? null,
     };
     this.settings.set(userId, structuredClone(current));
     return structuredClone(current);
