@@ -292,6 +292,51 @@ against Shopee, and it is the only remaining idea that is not already disproven.
 Otherwise Shopee is out, and a merchant that admits automation — Nylon Coffee reaches a real
 Shopify card form — is the shorter path to a demo that works.
 
+### Checkout traps found on real Singapore shops
+
+Reconnaissance across eight storefronts turned up three things that break a purchase, two of them
+silently. All measured on live checkouts.
+
+**1. Six frames claim to hold the card number, and five are decoys.**
+
+Shopify ships the SAME eight-input form into every one of its field iframes and shows exactly one
+per frame. On a live checkout `input[autocomplete="cc-number"]` matches in **six** frames. The
+seven decoys in each are not hidden: they are shrunk to about 2×2px with `visibility: visible`, so
+Playwright's `isVisible()` returns **true** for all of them.
+
+A first-match locator therefore types the card number into a 2px field inside `expiry-ltr.html`
+roughly five times in six. Nothing throws. The checkout just fails with an empty card number, on a
+single-use card already minted with ten minutes to live. Our own filler had this bug and passed its
+live test on frame ordering rather than correctness.
+
+The fix is to require a field wide enough for a person to type into (≥60px). Frame URL —
+`number-ltr.html`, `expiry-ltr.html`, `verification_value-ltr.html` — is a useful preference, but
+size is what decides, because it holds on gateways that name frames differently.
+
+**2. Shipping is added after the price, and can push an order past the card ceiling.**
+
+Polypet gives free delivery over S$100, so every order in our S$5–30 band **has a shipping charge
+added after the item price**, quoted only once a postal code is entered. A S$18.90 toy plus
+shipping and tax can exceed the S$30 the card can mint.
+
+This matters more than it sounds: the card must be minted for the **final** total, not the listed
+price. Today Happy mints for `listing.amountMinor` and the Closer then refuses when the merchant's
+total exceeds it — which is safe, and which means the purchase correctly never completes. Closing
+that gap needs the shipping cost determined *before* issuance.
+
+**3. Two ways to pick the wrong payment method.**
+
+Polypet's checkout offers "HitPay - QR Code, E-wallets and Cards" and a method literally labelled
+**"For Internal Use (Do not select)"** alongside Credit card. An agent must keep the Credit card
+radio selected rather than take the first option.
+
+Also: "Use shipping address as billing address" is ticked by default. That is the wrong default if
+the StraitsX card carries a different billing address — still one of the open questions.
+
+**Bonus, on bot walls:** superpaws.sg served a Cloudflare Turnstile after repeated requests, absent
+on a cold visit, and cleared itself after roughly ten minutes idle. Volume triggers it, not
+identity — worth pacing rehearsals.
+
 ### Merchants, measured rather than predicted
 
 Five merchants launched simultaneously through `demo/agentcore-server.ts`, plus earlier one-offs.
