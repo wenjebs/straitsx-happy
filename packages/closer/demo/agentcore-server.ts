@@ -29,6 +29,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { CDPSession, Page } from "playwright";
 import { type AgentCoreSession, startAgentCoreSession } from "../src/agentcore.js";
+import { readMerchantTotal } from "../src/service/total.js";
 
 const PORT = Number(process.env.AGENTCORE_TEST_PORT ?? 4041);
 const REGION = process.env.AWS_REGION ?? "ap-southeast-1";
@@ -493,6 +494,14 @@ const server = createServer(async (req, res) => {
         };
       });
       return send(res, 200, { url: slot.page.url(), ...info });
+    }
+
+    // GET /sessions/:id/total — runs the real reader against a live checkout, so a new merchant
+    // can be checked in one call before anyone wires listings for it.
+    if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "total") {
+      const slot = requireSlot(parts[1]);
+      const reading = await readMerchantTotal(slot.page);
+      return send(res, 200, { url: slot.page.url(), reading });
     }
 
     // GET /sessions/:id/cardfields

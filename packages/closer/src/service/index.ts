@@ -7,6 +7,7 @@ import { createJobStore } from "./jobs.js";
 import { createLiveView } from "./liveview.js";
 import { runPurchase } from "./run.js";
 import { browserForEnv, createPurchaseServer, releaseBrowser } from "./server.js";
+import { readMerchantTotal } from "./total.js";
 import type { PurchaseJobInput } from "./verify.js";
 
 export async function startPurchaseService(port?: number): Promise<Server> {
@@ -87,17 +88,16 @@ async function hasCardField(page: Page): Promise<boolean> {
   return false;
 }
 
-/** The merchant's own total, from structured markup — never merchant prose, never the payload. */
+/**
+ * The merchant's own total, read from the page it is charging on.
+ *
+ * Throwing when it cannot be read is the point: a total we cannot see is a purchase we must not
+ * make. Guessing here is what lets a merchant charge whatever it likes.
+ */
 async function readTotalMinor(page: Page): Promise<number> {
-  const raw = await page
-    .locator("[data-total-cents]")
-    .first()
-    .getAttribute("data-total-cents")
-    .catch(() => null);
-  if (raw === null) throw new Error("could not read the merchant's total from the page");
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) throw new Error(`merchant total is not a number: ${raw}`);
-  return parsed;
+  const reading = await readMerchantTotal(page);
+  if (!reading) throw new Error("could not read the merchant's total from the page");
+  return reading.amountMinor;
 }
 
 /**
