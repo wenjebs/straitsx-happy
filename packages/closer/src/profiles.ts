@@ -60,14 +60,20 @@ export function createProfileStore(root = process.env.CLOSER_PROFILE_DIR ?? "./c
      * `waitFor` decides when the sign-in is finished. The CLI waits for a keypress; a server waits
      * for the user to press a button in the app.
      */
-    async connect(host: string, loginUrl: string, waitFor: () => Promise<void>) {
+    async connect(
+      host: string,
+      loginUrl: string,
+      waitFor: (ctx: { context: BrowserContext }) => Promise<void>,
+    ) {
       const context = await chromium.launchPersistentContext(dirFor(host), { headless: false });
       try {
         const page = context.pages()[0] ?? (await context.newPage());
         await page.goto(loginUrl, { waitUntil: "load", timeout: 60_000 });
-        await waitFor();
+        await waitFor({ context });
       } finally {
-        await context.close(); // the profile is only written to disk on close
+        // The profile reaches disk on close. The user may have closed the window already, which
+        // closes the context too, so a second close is expected and harmless.
+        await context.close().catch(() => {});
       }
       return this.status(host);
     },

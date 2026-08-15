@@ -21,11 +21,16 @@ if (!url) {
 const store = createProfileStore();
 const host = new URL(url).hostname;
 
-const profile = await store.connect(host, url, async () => {
+const profile = await store.connect(host, url, async ({ context }) => {
   console.log(`\nprofile: ${store.dirFor(host)}`);
   console.log("Sign in in the window. Answer any code or puzzle yourself.");
-  console.log("Press Enter here when you are signed in.\n");
-  await new Promise((resolve) => process.stdin.once("data", resolve));
+  console.log("When you are signed in, CLOSE THE WINDOW. (Or press Enter here.)\n");
+  // Whichever the person does first. Closing the window is the reliable one: a terminal that
+  // gives this script no stdin would otherwise wait for a keypress that can never arrive.
+  await Promise.race([
+    context.waitForEvent("close").catch(() => {}),
+    new Promise((resolve) => process.stdin.once("data", resolve)),
+  ]);
 });
 
 console.log(`connected: ${profile.host} at ${profile.connectedAt}\n`);
