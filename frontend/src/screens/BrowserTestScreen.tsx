@@ -222,6 +222,11 @@ function Pane({
     };
   }, [session.id]);
 
+  // Taking over should put the keyboard in the page immediately, without a second click.
+  useEffect(() => {
+    if (focused) canvasRef.current?.focus();
+  }, [focused]);
+
   /* Map a point on the scaled screenshot back to a pixel in the remote viewport. */
   const toRemote = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -250,11 +255,56 @@ function Pane({
     drag.current = [{ ...p, t: e.timeStamp }];
   };
 
+  /* Hover forwarding, throttled. Off unless this pane has been taken over, because five panes each
+   * streaming pointer moves is a lot of chatter for no benefit. */
+  const lastMove = useRef(0);
+
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drag.current) return;
+    if (!drag.current) {
+      if (!focused) return;
+      // ~25/s is enough for a captcha to see a human approach without flooding the connection.
+      if (e.timeStamp - lastMove.current < 40) return;
+      lastMove.current = e.timeStamp;
+      const p = toRemote(e.clientX, e.clientY);
+      if (p) onAction("move", p);
+      return;
+    }
     const p = toRemote(e.clientX, e.clientY);
     // Cap the sample count: a slow drag can emit hundreds, and the replay would crawl.
     if (p && drag.current.length < 120) drag.current.push({ ...p, t: e.timeStamp });
+  };
+
+  /*
+   * Real keyboard capture while taken over, so typing goes straight through instead of via the
+   * text box below. Printable characters are typed; everything else is forwarded by name, which is
+   * what Playwright's `keyboard.press` expects.
+   */
+  const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (!focused) return;
+    e.preventDefault();
+    const k = e.key;
+    if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      onAction("type", { text: k });
+      return;
+    }
+    const named: Record<string, string> = {
+      Enter: "Enter",
+      Backspace: "Backspace",
+      Tab: "Tab",
+      Escape: "Escape",
+      ArrowUp: "ArrowUp",
+      ArrowDown: "ArrowDown",
+      ArrowLeft: "ArrowLeft",
+      ArrowRight: "ArrowRight",
+      Delete: "Delete",
+      Home: "Home",
+      End: "End",
+      PageUp: "PageUp",
+      PageDown: "PageDown",
+      " ": "Space",
+    };
+    const mapped = named[k];
+    if (mapped) onAction("key", { key: mapped });
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -292,20 +342,23 @@ function Pane({
         <span className={styles.paneLabel}>{session.label}</span>
         <span className={styles.paneHost}>{host}</span>
         <button type="button" className={styles.paneBtn} onClick={onFocus}>
-          {focused ? "shrink" : "expand"}
+          {focused ? "release" : "take over"}
         </button>
         <button type="button" className={styles.paneBtn} onClick={() => onAction("stop")}>
           stop
         </button>
       </header>
 
+      {/* tabIndex makes the canvas focusable so it can receive real key events while taken over. */}
       <canvas
         ref={canvasRef}
-        className={styles.frame}
+        className={`${styles.frame} ${focused ? styles.frameLive : ""}`}
         style={frame ? undefined : { display: "none" }}
+        tabIndex={focused ? 0 : -1}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onKeyDown={onKeyDown}
       />
       {!frame && <div className={styles.placeholder}>waiting for first frame…</div>}
 

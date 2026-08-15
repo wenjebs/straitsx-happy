@@ -293,6 +293,17 @@ const actions: Record<string, (slot: Slot, b: Record<string, unknown>) => Promis
     await slot.page.mouse.click(Number(b.x), Number(b.y));
     return slotStatus(slot);
   },
+  /**
+   * Hover without clicking.
+   *
+   * reCAPTCHA and friends score the pointer's approach, not just the click that lands — arriving
+   * instantly at a checkbox with no prior movement is one of the cheapest bot tells there is.
+   * Forwarding the operator's real mouse travel removes it, and it makes hover menus work.
+   */
+  move: async (slot, b) => {
+    await slot.page.mouse.move(Number(b.x), Number(b.y));
+    return { ok: true };
+  },
   // Typed, not filled — the same reason payWithCard types: instant entry with no keystrokes is a
   // named fraud signal, and this tab exists to rehearse the real path.
   type: async (slot, b) => {

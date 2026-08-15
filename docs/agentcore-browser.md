@@ -220,6 +220,49 @@ test number.
 `connectOverCDP` fidelity question, the OOPIF question and the "does typing reach the gateway"
 question are now all answered on the real thing rather than a local stand-in.
 
+### Auth persists across sessions — browser profiles work
+
+The original investigation missed this, and it is the most useful thing found since. A **browser
+profile** carries cookies and local storage from one session into the next, so a human can log in
+once through the live view and every later session starts authenticated — with the password never
+touching the agent or a model prompt.
+
+Verified end to end by `probe/agentcore-profile.ts`: session A sets a cookie → save → session A
+dies → session B starts *with* the profile → the cookie is there. Against Shopee, session B came up
+carrying **16 cookies**, 15 of them Shopee's own from the previous session.
+
+The mechanics are not obvious and cost an hour, so they are worth writing down:
+
+| | |
+|---|---|
+| Create | `CreateBrowserProfile` — on the **control** plane (`@aws-sdk/client-bedrock-agentcore-control`), not the data plane |
+| Name constraint | `[a-zA-Z][a-zA-Z0-9_]{0,47}` — **underscores, no hyphens**. AWS appends its own `-XXXXXXXXXX` suffix to form the identifier |
+| Save | `SaveBrowserSessionProfile` — data plane. Does **not** create: an unknown identifier answers `ResourceNotFoundException` |
+| List | `ListBrowserProfiles` → `profileSummaries` (not `browserProfileSummaries`), each with `profileId`, `status`, `lastSavedAt` |
+| Use | `StartBrowserSession({ profileConfiguration: { profileIdentifier } })` |
+| IAM | `SaveBrowserSessionProfile` on the data plane; `CreateBrowserProfile` / `GetBrowserProfile` / `ListBrowserProfiles` / `UpdateBrowserProfile` / `DeleteBrowserProfile` on the control plane |
+
+**Gotcha:** `SaveBrowserSessionProfile` intermittently answers `AccessDeniedException` even with the
+policy attached and the profile `READY` — observed succeeding twice, failing once, then succeeding
+again within four minutes. It appears to be a throttle or a post-save cooldown misreported as an
+authorisation failure. Retry before believing it.
+
+**It does not defeat Shopee.** A profile-backed session still lands on `/verify/traffic/error` with
+`is_logged_in=false`. The block is applied to the datacentre IP on the homepage, before a login
+form is ever reachable, so "log in once and reuse the profile" cannot rescue it. The lever for that
+case is `proxyConfiguration` on `StartBrowserSession`, which routes through a proxy you supply —
+untested, and a separate experiment.
+
+Where profiles *do* pay off is every merchant that admits us but wants an account, and any flow
+where a human clears a captcha once and later runs should not face it again.
+
+### A methodology note: never read the URL at `domcontentloaded`
+
+A bot bounce is a redirect that lands *after* `domcontentloaded`. Reading `page.url()` at that point
+reports the URL you asked for rather than the one you got, which turns a block into a false pass —
+this probe reported Shopee as reachable twice before the settle wait was added. Every merchant
+verdict in this document waits and re-reads.
+
 ### Merchants, measured rather than predicted
 
 Five merchants launched simultaneously through `demo/agentcore-server.ts`, plus earlier one-offs.

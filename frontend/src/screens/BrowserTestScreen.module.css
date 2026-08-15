@@ -121,8 +121,20 @@
   flex-direction: column;
 }
 
+/* Taken over: full width, so a captcha tile is a real target rather than a few pixels. */
 .paneFocused {
   grid-column: 1 / -1;
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--text-primary);
+}
+
+.frameLive {
+  outline: none;
+  cursor: default;
+}
+
+.frameLive:focus-visible {
+  outline: none;
 }
 
 .paneHead {
