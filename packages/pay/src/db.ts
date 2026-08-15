@@ -39,7 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_state ON payments(state);
 
 export function openDb(url: string): Db {
   const file = url.replace(/^file:/, "") || ":memory:";
-  const raw = new Database(file === "::memory:" ? ":memory:" : file);
+  const raw = new Database(file);
   raw.exec(SCHEMA);
   const wrap = (r: Database.Database): Db => ({
     raw: r,

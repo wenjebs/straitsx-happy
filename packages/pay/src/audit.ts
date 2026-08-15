@@ -8,13 +8,19 @@ export type AuditEvent = {
   at: string;
 };
 
-const FORBIDDEN = /(^|_)(pan|cvv|cvc|number|signature|privateKey)($|_)/i;
+const FORBIDDEN = /pan|cvv|cvc|number|signature|privatekey/;
+
+// Normalise the key (strip underscores, lowercase) before testing so casing and
+// separator choices can't smuggle secrets past the filter — `spendPrivateKey`,
+// `card_number` and `cardNumber` must all redact the same way.
+const isForbiddenKey = (key: string): boolean =>
+  FORBIDDEN.test(key.replace(/_/g, "").toLowerCase());
 
 export function appendAudit(
   db: Db,
   e: { purchaseId?: string; kind: string; detail: unknown },
 ): void {
-  const detail = JSON.stringify(e.detail ?? {}, (k, v) => (FORBIDDEN.test(k) ? "[redacted]" : v));
+  const detail = JSON.stringify(e.detail ?? {}, (k, v) => (isForbiddenKey(k) ? "[redacted]" : v));
   db.raw
     .prepare(`INSERT INTO audit_events (purchase_id, kind, detail, at) VALUES (?,?,?,?)`)
     .run(e.purchaseId ?? null, e.kind, detail, new Date().toISOString());

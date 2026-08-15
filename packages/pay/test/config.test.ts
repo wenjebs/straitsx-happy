@@ -33,4 +33,14 @@ describe("loadConfig", () => {
       /SPEND_PRIVATE_KEY/,
     );
   });
+
+  it("rejects a malformed CHAIN_ID", () => {
+    expect(() => loadConfig({ ...base, CHAIN_ID: "abc" } as NodeJS.ProcessEnv)).toThrow(/CHAIN_ID/);
+  });
+
+  it("rejects a fractional MIN_CARD_CENTS", () => {
+    expect(() => loadConfig({ ...base, MIN_CARD_CENTS: "500.5" } as NodeJS.ProcessEnv)).toThrow(
+      /MIN_CARD_CENTS/,
+    );
+  });
 });
