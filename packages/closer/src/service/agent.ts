@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import type { ShippingAddress } from "./address.js";
 import { hasUsableCardField, observe } from "./navigator.js";
 import { describe, executeTool, Refused, TOOL_SCHEMA, type ToolCall } from "./tools.js";
 
@@ -48,7 +49,8 @@ Hard rules:
   use", and do not pick an instalment plan or a wallet.
 - Do not change the quantity or the product variant. What is selected was already approved, and
   other variants are priced differently.
-- Use a plausible Singapore delivery address if one is required.
+- If a delivery address is required, use the buyer's address given below, exactly as written.
+  Never invent an address: an order shipped to a made-up address never arrives.
 
 If the page is a bot wall, an error, or demands an account you cannot create, call "give_up" and
 quote what it says.`;
@@ -62,14 +64,15 @@ quote what it says.`;
 export async function runBrowserAgent(
   page: Page,
   deps: AgentDeps,
-  opts: { allowedHost: string; goal: string },
+  opts: { allowedHost: string; goal: string; shippingAddress?: ShippingAddress | undefined },
 ): Promise<void> {
   const log = deps.log ?? (() => {});
   const maxTurns = deps.maxTurns ?? 14;
 
+  const address = opts.shippingAddress ? describeAddress(opts.shippingAddress) : "";
   const messages: unknown[] = [
     { role: "system", content: SYSTEM },
-    { role: "user", content: `GOAL: ${opts.goal}` },
+    { role: "user", content: `GOAL: ${opts.goal}${address}` },
   ];
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -193,4 +196,20 @@ function safeParse(json: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/** The buyer's real address, for the checkout forms the deterministic filler could not match. */
+function describeAddress(a: ShippingAddress): string {
+  const lines = [
+    `name: ${a.recipientName}`,
+    `address line 1: ${a.addressLine1}`,
+    ...(a.addressLine2 ? [`address line 2: ${a.addressLine2}`] : []),
+    `city: ${a.city}`,
+    ...(a.stateOrProvince ? [`state/province: ${a.stateOrProvince}`] : []),
+    `postal code: ${a.postalCode}`,
+    ...(a.country ? [`country: ${a.country}`] : []),
+    ...(a.phone ? [`phone: ${a.phone}`] : []),
+    ...(a.email ? [`email: ${a.email}`] : []),
+  ];
+  return `\n\nDELIVERY ADDRESS — use these values verbatim, do not invent any:\n${lines.join("\n")}`;
 }

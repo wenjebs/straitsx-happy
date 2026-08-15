@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import type { BrowserLike } from "../types.js";
+import { fillAddressInto } from "./address.js";
 import { type CardMaterial, claimCard, revealCard } from "./card.js";
 import { eventIdFor, type PurchaseEvent, sendCallback } from "./callbacks.js";
 import type { JobStore } from "./jobs.js";
@@ -35,6 +36,8 @@ export type RunDeps = {
   /** Starts streaming the page into the live view. Returns a stop function. */
   attachFrames?: (page: Page, attemptId: string) => Promise<() => Promise<void>>;
   fillCard: (page: Page, card: CardMaterial) => Promise<void>;
+  /** Fills the delivery address. Defaults to the real one; tests pass a stub. */
+  fillAddress?: (page: Page, address: NonNullable<PurchaseJobInput["shippingAddress"]>) => Promise<string[]>;
   readTotalMinor: (page: Page) => Promise<number>;
   /** Overrides the default logger. Tests pass a sink to keep output quiet. */
   log?: RunLog;
@@ -97,6 +100,17 @@ export async function runPurchase(deps: RunDeps, job: PurchaseJobInput): Promise
       log("navigating to payment page", { url: job.listing.url ?? "" });
       await deps.toPaymentPage(page, job);
       log("reached payment page", { at: page.url() });
+    }
+
+    checkCancelled();
+    /*
+     * Address first, card last. Everything before the claim is free to fail and retry; the same
+     * failure after issuance strands a card that is already alive and single-use.
+     */
+    if (job.shippingAddress) {
+      const fill = deps.fillAddress ?? fillAddressInto;
+      const filled = await fill(page, job.shippingAddress).catch(() => [] as string[]);
+      log("delivery address filled", { fields: filled.join(",") || "none" });
     }
 
     checkCancelled();

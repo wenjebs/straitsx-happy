@@ -91,6 +91,7 @@ async function toPaymentPage(page: Page, job: PurchaseJobInput): Promise<void> {
     {
       allowedHost: new URL(job.listing.url).hostname,
       goal: `Buy one "${job.item.name}" from this shop for about ${job.listing.price}. Reach the card fields, then stop.`,
+      ...(job.shippingAddress ? { shippingAddress: job.shippingAddress } : {}),
     },
   );
 }

@@ -23,6 +23,20 @@ export type PurchaseJobInput = {
     currency: string;
     expiresAt: string;
   };
+  /** The buyer's delivery address, filled into the checkout before any card is claimed. */
+  shippingAddress?:
+    | {
+        recipientName: string;
+        addressLine1: string;
+        addressLine2?: string | undefined;
+        city: string;
+        stateOrProvince?: string | undefined;
+        postalCode: string;
+        country?: string | undefined;
+        phone?: string | undefined;
+        email?: string | undefined;
+      }
+    | undefined;
   sandbox: boolean;
   idempotencyKey: string;
   amountMinor: number;
