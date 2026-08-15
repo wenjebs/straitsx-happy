@@ -1,3 +1,4 @@
+import { debug } from "./debug";
 /*
  * Every call the UI makes to the backend.
  *
@@ -369,6 +370,7 @@ async function request<T>(path: string, init?: RequestInit, retryAuth = true): P
       "VITE_API_BASE_URL is not set, so there is no backend to talk to. Start the backend and point the frontend at it.",
     );
   }
+  const startedAt = performance.now();
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -377,6 +379,7 @@ async function request<T>(path: string, init?: RequestInit, retryAuth = true): P
       ...init?.headers,
     },
   });
+  debug.request(init?.method ?? "GET", path, res.status, performance.now() - startedAt);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     if (res.status === 401) {
@@ -621,6 +624,7 @@ export function subscribeToActivity(
         throw new ApiError(response.status, `Activity stream failed (${response.status}).`);
       }
       onState?.("open");
+      debug.stream(id, "open");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -639,7 +643,9 @@ export function subscribeToActivity(
       if (!closed) throw new Error("Activity stream closed.");
     } catch (error) {
       if (closed || (error instanceof DOMException && error.name === "AbortError")) return;
+      debug.error(`stream ${id}`, error);
       onState?.("connecting");
+      debug.stream(id, "reconnecting in 1500ms");
       reconnectTimer = setTimeout(() => void connect(), 1500);
     }
   };
@@ -667,7 +673,9 @@ function dispatchSseFrame(
   }
   if (!types.includes(type as ActivityEvent["type"]) || data.length === 0) return;
   try {
-    onEvent({ type, ...JSON.parse(data.join("\n")) } as ActivityEvent);
+    const parsed = JSON.parse(data.join("\n"));
+    debug.event(String(parsed.activityId ?? parsed.id ?? ""), type, parsed);
+    onEvent({ type, ...parsed } as ActivityEvent);
   } catch {
     /* A malformed frame must not tear down a live purchase stream. */
   }
@@ -770,4 +778,36 @@ export function updateSettings(changes: Partial<Settings>): Promise<Settings> {
 
 export function getProfile(): Promise<Profile> {
   return get("/v1/profile");
+}
+
+
+// ---------------------------------------------------------------------------
+// Health — which rail the backend is on
+// ---------------------------------------------------------------------------
+
+export interface HealthNetwork {
+  chainId: number;
+  name: string;
+  issuer: "mock" | "straitsx";
+  cardApi: "sandbox" | "production";
+  walletAddress: string | null;
+  explorerUrl: string;
+  /** True only when the chain, the issuer and the card API all say production. */
+  realMoney: boolean;
+}
+
+export interface Health {
+  ok: boolean;
+  scoutProvider: string;
+  cardProvider: string;
+  purchaseAgentProvider: string;
+  network: HealthNetwork;
+  blockers: string[];
+  warnings: string[];
+}
+
+export async function getHealth(): Promise<Health> {
+  const health = await get<Health>("/v1/health");
+  debug.rail(health as unknown as Record<string, unknown>);
+  return health;
 }

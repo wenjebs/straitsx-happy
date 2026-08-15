@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import type { Settings, ShippingAddress } from "../lib/Api";
+import { getHealth, type Health, type Settings, type ShippingAddress } from "../lib/Api";
 import styles from "./SettingsScreen.module.css";
 
 interface SettingsScreenProps {
@@ -26,6 +26,22 @@ export function SettingsScreen({ settings, onSaveAddress }: SettingsScreenProps)
   const [saving, setSaving] = useState(false);
 
   useEffect(() => setAddress({ ...(settings?.shippingAddress ?? EMPTY_ADDRESS) }), [settings]);
+
+  /*
+   * Which rail this backend is on, read from it rather than guessed. The chain id is what decides
+   * whether a purchase spends real XSGD, and a demo that cannot tell testnet from mainnet at a
+   * glance is one misconfigured variable away from spending real money by accident.
+   */
+  const [health, setHealth] = useState<Health | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getHealth()
+      .then((next) => !cancelled && setHealth(next))
+      .catch(() => !cancelled && setHealth(null));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!settings) return <div className={styles.screen} />;
 
@@ -63,6 +79,48 @@ export function SettingsScreen({ settings, onSaveAddress }: SettingsScreenProps)
     <div className={styles.screen}>
       <div className={styles.column}>
         <h2 className={styles.h2}>Settings</h2>
+
+        {health && (
+          <div
+            className={`${styles.network} ${health.network.realMoney ? styles.networkLive : styles.networkTest}`}
+          >
+            <div className={styles.networkHead}>
+              <span className={styles.networkBadge}>
+                {health.network.realMoney ? "MAINNET · REAL MONEY" : "TESTNET"}
+              </span>
+              <span className={styles.networkName}>{health.network.name}</span>
+            </div>
+            <dl className={styles.networkGrid}>
+              <div>
+                <dt>Chain</dt>
+                <dd>{health.network.chainId}</dd>
+              </div>
+              <div>
+                <dt>Card issuer</dt>
+                <dd>
+                  {health.network.issuer} · {health.network.cardApi}
+                </dd>
+              </div>
+              <div>
+                <dt>Closer</dt>
+                <dd>{health.purchaseAgentProvider}</dd>
+              </div>
+              <div>
+                <dt>Wallet</dt>
+                <dd className={styles.networkMono}>
+                  {health.network.walletAddress
+                    ? `${health.network.walletAddress.slice(0, 6)}…${health.network.walletAddress.slice(-4)}`
+                    : "not configured"}
+                </dd>
+              </div>
+            </dl>
+            <p className={styles.networkNote}>
+              {health.network.realMoney
+                ? "Purchases here spend real XSGD on Avalanche and mint real cards. There are no refunds on this rail."
+                : "Purchases here settle on a test network. No real money moves."}
+            </p>
+          </div>
+        )}
         <div className={styles.panel}>
           {values.map((row) => (
             <div className={styles.row} key={row.name}>

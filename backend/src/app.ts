@@ -90,6 +90,25 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
       purchaseAgentProvider: deps.purchaseAgents.mode,
       fundingProvider: deps.config.FUNDING_MODE,
       authProvider: deps.auth.mode,
+      /*
+       * Which rail this stack is actually on.
+       *
+       * Chain id is what makes the money real or fake, and reading it off a screen beats guessing
+       * from provider names: 43114 with the production card API spends real XSGD, anything else
+       * does not. The wallet address is public; no key, token or card material appears here.
+       */
+      network: {
+        chainId: deps.config.CHAIN_ID,
+        name: deps.config.FUNDING_NETWORK_NAME,
+        issuer: deps.config.ISSUER,
+        cardApi: deps.config.CARD_API_BASE.includes("/production/") ? "production" : "sandbox",
+        walletAddress: deps.config.HAPPY_WALLET_ADDRESS ?? null,
+        explorerUrl: deps.config.FUNDING_EXPLORER_URL,
+        realMoney:
+          deps.config.CHAIN_ID === 43114 &&
+          deps.config.ISSUER === "straitsx" &&
+          deps.config.CARD_API_BASE.includes("/production/"),
+      },
       blockers: [
         ...(deps.planner.mode === "disabled" ? ["PLANNER_NOT_CONFIGURED"] : []),
         ...(deps.scouts.mode === "disabled" ? ["SCOUT_API_NOT_CONFIGURED"] : []),

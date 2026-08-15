@@ -32,6 +32,8 @@ const config: Config = {
   PLANNER_MODE: "remote",
   SCOUT_MODE: "remote",
   ALLOW_MOCK_MONEY: false,
+  ISSUER: "mock",
+  CARD_API_BASE: "https://card.straitsx.ai/sandbox/cardapi",
   AGENTCORE_BROWSER_ID: "aws.browser.v1",
   AGENTCORE_SESSION_TIMEOUT_SECONDS: 900,
   AGENTCORE_MAX_SESSIONS: 4,

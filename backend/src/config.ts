@@ -100,6 +100,12 @@ const Env = z
      * Escape hatch for the hosted demo: run the mock card and mock closer on a deployed stack.
      * No card is ever minted and no value moves, so the flow is a walkthrough, not a purchase.
      */
+    /*
+     * @happy/pay's own settings, mirrored here only so /v1/health can report which rail is live.
+     * The library reads process.env itself; these are never used to configure it.
+     */
+    ISSUER: z.enum(["mock", "straitsx"]).default("mock"),
+    CARD_API_BASE: z.string().default("https://card.straitsx.ai/sandbox/cardapi"),
     ALLOW_MOCK_MONEY: z
       .preprocess((value) => value === "true" || value === true, z.boolean())
       .default(false),
