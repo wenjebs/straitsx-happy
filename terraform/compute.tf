@@ -178,12 +178,14 @@ resource "aws_ecs_service" "backend" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
-  # Event fan-out is process-local today. Avoid two active revisions during a
-  # deployment; EventSource reconnects and receives a fresh DynamoDB snapshot.
-  deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
+  # Keep the current task serving until its replacement passes both container
+  # and ALB health checks. A rollout may briefly run two revisions, but that is
+  # preferable to returning 503 while the only task is being replaced.
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
   health_check_grace_period_seconds  = 30
   enable_execute_command             = true
+  wait_for_steady_state              = true
 
   deployment_circuit_breaker {
     enable   = true
