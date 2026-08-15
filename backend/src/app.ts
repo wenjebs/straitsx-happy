@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { revealCard } from "@happy/pay";
 import { Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { stream, streamSSE } from "hono/streaming";
@@ -11,6 +12,7 @@ import type { EventHub } from "./events.js";
 import type { PlannerProvider, ScoutProvider } from "./providers/agent.js";
 import type { CardProvider } from "./providers/card.js";
 import type { PurchaseAgentProvider } from "./providers/purchaseAgent.js";
+import { StraitsXCardProvider } from "./providers/straitsxCard.js";
 import type { Repository } from "./repository.js";
 import type { FrameHub } from "./streams.js";
 import { verifyStreamToken } from "./streamTokens.js";
@@ -263,6 +265,35 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     assertCallbackAuth(c.req.header(), deps.config.PURCHASE_CALLBACK_TOKEN);
     const body = await parseBody(c.req.raw, PurchaseAgentCallbackEvent);
     return c.json(await deps.purchases.handleAgentEvent(c.req.param("id"), body), 202);
+  });
+
+  /*
+   * Card material for the real rail. Only the Closer holding the one-use grant token reaches it,
+   * and the response is never logged or written to the audit trail.
+   */
+  app.get("/v1/cards/:id/reveal", async (c) => {
+    const provider = deps.cards;
+    if (!(provider instanceof StraitsXCardProvider)) {
+      throw new HttpError(404, "The card rail does not serve reveals.");
+    }
+    const authorization = c.req.header("authorization");
+    const token = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : c.req.query("token");
+    const cardId = c.req.param("id");
+    if (!token || !provider.checkGrant(cardId, token)) {
+      throw new HttpError(401, "Card grant token is missing or invalid.");
+    }
+    const material = await revealCard(cardId);
+    if (!material) throw new HttpError(404, "No card exists for that purchase.");
+    // The Closer wants month and year apart; the issuer reports "MM/YY".
+    const [month = "", year = ""] = material.expiry.split("/");
+    return c.json({
+      pan: material.pan,
+      expiryMonth: month.trim(),
+      expiryYear: year.trim(),
+      cvc: material.cvc,
+    });
   });
 
   app.post("/v1/integrations/purchases/:id/attempts/:attemptId/card", async (c) => {

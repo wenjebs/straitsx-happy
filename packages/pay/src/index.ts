@@ -178,6 +178,17 @@ export async function listPurchases(limit = 20) {
     .map(shape);
 }
 
+/**
+ * Card material for one purchase. The reveal is one-use at the issuer, so only the Closer that is
+ * about to type the digits may call this — never a log, a response body or a model prompt.
+ */
+export async function revealCard(purchaseId: string) {
+  const { db, issuer } = get();
+  const card = db.raw.prepare(`SELECT * FROM cards WHERE purchase_id=?`).get(purchaseId) as any;
+  if (!card) return null;
+  return issuer.reveal(card.opaque_id);
+}
+
 export async function getAuditLog(purchaseId: string) {
   return readAudit(get().db, purchaseId);
 }

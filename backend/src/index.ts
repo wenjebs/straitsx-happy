@@ -25,6 +25,7 @@ import {
   type PurchaseAgentProvider,
   RemotePurchaseAgentProvider,
 } from "./providers/purchaseAgent.js";
+import { StraitsXCardProvider } from "./providers/straitsxCard.js";
 import { OpenAIScoutBrain, type ScoutBrain, ScriptedScoutBrain } from "./providers/scoutBrain.js";
 import { WebSearchScoutBrain } from "./providers/webSearchBrain.js";
 import { resolveWikimediaImage } from "./providers/wikimediaImages.js";
@@ -89,9 +90,11 @@ const cards: CardProvider =
         baseUrl: config.CARD_API_BASE_URL,
         ...(config.CARD_API_TOKEN ? { token: config.CARD_API_TOKEN } : {}),
       })
-    : config.CARD_MODE === "local"
-      ? new LocalCardProvider(config.PUBLIC_BASE_URL)
-      : new DisabledCardProvider();
+    : config.CARD_MODE === "straitsx"
+      ? new StraitsXCardProvider(config.PUBLIC_BASE_URL)
+      : config.CARD_MODE === "local"
+        ? new LocalCardProvider(config.PUBLIC_BASE_URL)
+        : new DisabledCardProvider();
 const purchaseAgents: PurchaseAgentProvider =
   config.PURCHASE_AGENT_MODE === "remote" && config.PURCHASE_AGENT_API_BASE_URL
     ? new RemotePurchaseAgentProvider({

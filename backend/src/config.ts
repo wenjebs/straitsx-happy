@@ -76,7 +76,7 @@ const Env = z
     AGENT_API_BASE_URL: optionalUrl,
     AGENT_API_TOKEN: optionalString,
     AGENT_CALLBACK_TOKEN: optionalString,
-    CARD_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
+    CARD_MODE: z.enum(["local", "straitsx", "remote", "disabled"]).default("local"),
     CARD_API_BASE_URL: optionalUrl,
     CARD_API_TOKEN: optionalString,
     PURCHASE_AGENT_MODE: z.enum(["local", "remote", "disabled"]).default("local"),
