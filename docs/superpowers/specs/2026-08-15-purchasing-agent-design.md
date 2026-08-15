@@ -706,6 +706,22 @@ The first two were **fixed in 585a171**; the Closer is specified against the new
    code:** the demo script must state that a 3DS challenge burns the card, so nobody meets it live.
 4. `cancel` after issuance always strands. Correct, and no change wanted — noted so nobody reads
    `stranded` as a Closer bug.
+5. **`fillFirst` cannot reach a real merchant's card fields.** Measured at Wardah Books on
+   15 Aug 2026, on a guest checkout an automated browser reached without a login:
+
+   ```
+   frame wardahbooks.com              24 inputs   email, address1, postalCode, phone …
+   frame checkout.pci.shopifyinc.com   8 inputs   number|cc-number  expiry|cc-exp
+                                                  verification_value|cc-csc
+   page.locator('input[autocomplete="cc-number"]') finds: 0
+   ```
+
+   The selectors are right; the fields are one frame down, and `page.locator` does not cross
+   frames. PCI DSS pushes every serious gateway to this shape, so it is not a Shopify quirk.
+   **No real purchase is possible until `fillFirst` also searches `page.frames()`.** Two knock-on
+   effects: `submitLocator`'s `form:has(...)` scoping cannot match across documents, so the decoy
+   protection stops applying exactly where it matters; and six identical card frames were present,
+   so the search must take the visible one. Raised with the owner; not changed here.
 
 ### 11.2 `BACKEND_CONTRACT.md` mismatches — flag, do not paper over
 
