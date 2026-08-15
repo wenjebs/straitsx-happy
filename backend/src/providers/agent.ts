@@ -1,5 +1,6 @@
 import type { Activity } from "../domain.js";
 import { HttpError } from "../errors.js";
+import { STUB_LISTINGS } from "./stubListings.js";
 
 export interface PlannerProvider {
   readonly mode: "local" | "remote" | "openai" | "disabled";
@@ -320,6 +321,13 @@ export class DisabledAgentProvider implements AgentProvider {
 }
 
 function localShortlist(activity: Activity) {
+  // Stubbed discovery. The fixtures below point at example.com, which has no checkout — fine for
+  // walking the UI, useless the moment a real Closer tries to buy from them. STUB_LISTINGS carries
+  // URLs that resolve to something real, and DEMO_STORE_URL points at our own storefront, which is
+  // the only target that completes a purchase offline.
+  const stubbed = stubbedShortlist(activity);
+  if (stubbed) return stubbed;
+
   return activity.wishlist.map((item) => {
     const isCable = item.id === "usb-c-cable" || /cable/i.test(item.name);
     return {
@@ -367,6 +375,61 @@ function localShortlist(activity: Activity) {
       ],
     };
   });
+}
+
+/**
+ * Listings the Closer can actually open, chosen by `SCOUT_LISTINGS`.
+ *
+ *   demo-store — our own storefront. The only target that completes a purchase offline, because
+ *                AgentCore's browser runs in AWS and cannot reach localhost, so this pairs with
+ *                CLOSER_BROWSER=local.
+ *   stub       — the real Shopee and Lazada listings in stubListings.ts. Lazada throws a slider
+ *                captcha a human clears in the live view; Shopee hard-bounces. Both are the
+ *                measured truth rather than a happy path.
+ *
+ * Unset falls through to the example.com fixtures, which are fine for walking the UI and useless
+ * for buying anything.
+ */
+function stubbedShortlist(activity: Activity) {
+  const mode = process.env.SCOUT_LISTINGS;
+  if (mode !== "demo-store" && mode !== "stub") return null;
+
+  const pool =
+    mode === "demo-store"
+      ? demoStoreListings()
+      : STUB_LISTINGS.map((l) => ({ ...l, rating: `${l.rating} · demo` }));
+
+  return activity.wishlist.map((item, i) => {
+    const listing = pool[i % pool.length];
+    if (!listing) throw new Error("no stub listings configured");
+    return { itemId: item.id, reSearched: false, listing, alternates: [] };
+  });
+}
+
+function demoStoreListings() {
+  const base = (process.env.DEMO_STORE_URL ?? "http://127.0.0.1:4030").replace(/\/$/, "");
+  // Prices mirror apps/demo-store's own catalogue. They must match, or the Closer's total check
+  // refuses the purchase — which is the check doing its job.
+  return [
+    {
+      title: "Anker USB-C Hub",
+      seller: "demo-store",
+      rating: "4.7 · demo",
+      price: "S$18.00",
+      amountMinor: 1800,
+      why: "Matches the specification within budget.",
+      url: `${base}/item/usb-c-hub`,
+    },
+    {
+      title: "1TB NVMe SSD",
+      seller: "demo-store",
+      rating: "4.8 · demo",
+      price: "S$29.00",
+      amountMinor: 2900,
+      why: "Highest capacity still inside the card's S$30 ceiling.",
+      url: `${base}/item/nvme-ssd`,
+    },
+  ];
 }
 
 function delay(ms: number): Promise<void> {
