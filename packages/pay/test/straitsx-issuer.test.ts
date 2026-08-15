@@ -3,12 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StraitsXIssuer } from "../src/issuer/straitsx.js";
 import { TokenBucket } from "../src/x402/bucket.js";
 
-// send() dumps the raw rail response to ./card-response-<ts>.json before parsing it (see
+// send() dumps the raw rail response to ./card-responses/<nonce>.json before parsing it (see
 // straitsx.ts) — every test that calls send() leaves one of these behind. Sweep them up so
 // the working tree stays clean; they are gitignored regardless.
+const CARD_RESPONSE_DIR = "./card-responses";
+
 function sweepCardResponseFiles(): string[] {
-  const files = readdirSync(".").filter((f) => f.startsWith("card-response-"));
-  for (const f of files) rmSync(f, { force: true });
+  let files: string[];
+  try {
+    files = readdirSync(CARD_RESPONSE_DIR);
+  } catch {
+    return [];
+  }
+  for (const f of files) rmSync(`${CARD_RESPONSE_DIR}/${f}`, { force: true });
   return files;
 }
 
@@ -222,8 +229,10 @@ describe("StraitsXIssuer", () => {
     const r = await iss.send(req, prepared);
     expect(r.opaqueId).toBe(prepared.nonce); // falls back to the nonce, never undefined
 
-    const created = readdirSync(".").filter((f) => f.startsWith("card-response-"));
-    expect(created).toHaveLength(1);
-    expect(JSON.parse(readFileSync(created[0]!, "utf8"))).toMatchObject({ settlement_tx: "0xtx" });
+    const created = readdirSync(CARD_RESPONSE_DIR);
+    expect(created).toEqual([`${prepared.nonce}.json`]); // named after the payment, not the clock
+    expect(JSON.parse(readFileSync(`${CARD_RESPONSE_DIR}/${created[0]!}`, "utf8"))).toMatchObject({
+      settlement_tx: "0xtx",
+    });
   });
 });

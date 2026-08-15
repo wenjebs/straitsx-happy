@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { minorToAmountSgd } from "@happy/shared";
 import type { Config } from "../config.js";
 import type { TokenBucket } from "../x402/bucket.js";
@@ -124,8 +124,23 @@ export class StraitsXIssuer implements IssuerAdapter {
     // guessed regexes over an unconfirmed shape. Dump the raw text to disk before touching it —
     // if the guesses are wrong, this file is the difference between money silently lost and
     // money spent with the digits recoverable by a human.
+    //
+    // This file contains live card material (PAN, expiry, CVC) in the clear. It exists only
+    // as a recovery path for a failed extraction above — delete it once the card is spent.
+    //
+    // Named after the nonce (unique per payment by construction), not the clock: two send()
+    // calls completing in the same millisecond — a reconciliation replay racing a fresh
+    // issuance, say — must not collide on a filename. `wx` then makes a genuine repeat throw
+    // (caught below) instead of silently overwriting an earlier, still-needed dump.
     try {
-      writeFileSync(`./card-response-${Date.now()}.json`, paid.text);
+      const dir = "./card-responses";
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const fd = openSync(`${dir}/${prepared.nonce}.json`, "wx", 0o600);
+      try {
+        writeSync(fd, paid.text);
+      } finally {
+        closeSync(fd);
+      }
     } catch {
       // best effort only — never let a disk failure block issuance
     }

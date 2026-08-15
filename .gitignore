@@ -18,7 +18,7 @@ build/
 *.sqlite3
 
 # raw issuer responses — may contain card material, never commit
-card-response-*.json
+card-responses/
 
 # research scratch / third-party docs — not ours to republish
 research-raw.json
