@@ -28,6 +28,16 @@ interface LocalPlannerOptions {
  * Local planner failsafe. It exercises the authenticated callback and the SSE path without an
  * OpenAI key, so the chat and wishlist screens work offline.
  *
+ * It used to answer every request with the same two hardcoded items, which meant asking for
+ * skincare and watching the scouts go looking for coffee. A stub that ignores the request is worse
+ * than no stub: it looks like the search is broken when it is the planner that never read the
+ * goal.
+ *
+ * So it splits what was actually typed. No model, no inference — it takes the request apart on
+ * commas and "and", which is honest about being a fallback and still sends the scouts after the
+ * thing that was asked for. Set PLANNER_MODE=openai for a planner that decomposes a real request
+ * into a bill of materials.
+ *
  * It deliberately has no search half. The search phase used to be simulated here — four timed
  * stages and a hardcoded shortlist of products that did not exist — and that is now
  * `AgentCoreScoutProvider`, which drives real browsers over real storefronts.
@@ -40,35 +50,29 @@ export class LocalPlannerProvider implements PlannerProvider {
 
   async startPlanning(activity: Activity): Promise<void> {
     this.cancelled.delete(activity.id);
+    const goal =
+      activity.messages.find((message) => message.role === "user")?.text?.trim() ||
+      activity.title.trim();
+    const names = splitGoal(goal);
+
     void this.after(700, activity.id, {
       type: "wishlist.ready",
-      title: "Coffee and a notebook",
-      reply:
-        "I turned that into two low-value items so you can safely walk through the complete agent and purchase flow.",
-      wishlistEstimate: "est. S$40.00",
-      // Chosen to match what the verified merchants in merchants.ts actually sell. A wishlist of
-      // electronics would send real scouts to a coffee roaster and a bookshop and correctly find
-      // nothing, which reads as a broken search rather than an empty one.
-      wishlist: [
-        {
-          id: "filter-coffee",
-          name: "Filter coffee beans",
-          short: "COFFEE",
-          spec: "single origin · 250g · whole bean",
-          budget: "up to S$30",
-          hueIndex: 0,
-          category: "Groceries",
-        },
-        {
-          id: "notebook",
-          name: "Pocket notebook",
-          short: "NOTEBOOK",
-          spec: "A6 · plain or dotted · softcover",
-          budget: "up to S$20",
-          hueIndex: 1,
-          category: "Stationery",
-        },
-      ],
+      title: goal.length > 60 ? `${goal.slice(0, 57)}…` : goal,
+      reply: `Working without a planner model, so I split your request literally into ${
+        names.length === 1 ? "one item" : `${names.length} items`
+      } and sent the scouts to the verified shops. Edit the list before dispatching if I read it wrong.`,
+      wishlistEstimate: `up to S$${((names.length * 3000) / 100).toFixed(2)}`,
+      wishlist: names.map((name, index) => ({
+        id: `item-${index + 1}-${slug(name)}`,
+        name,
+        short: name.toUpperCase().slice(0, 16),
+        // No model means no specification worth inventing. Saying so beats fabricating
+        // "single origin · 250g · whole bean" for something the shopper never described.
+        spec: "as described",
+        // The card cannot mint above S$30, so nothing larger is worth searching for.
+        budget: "up to S$30",
+        hueIndex: index % 6,
+      })),
       clarifications: [],
     });
   }
@@ -225,6 +229,49 @@ export class DisabledAgentProvider implements AgentProvider {
   async rejectListing(): Promise<void> {
     this.unavailable();
   }
+}
+
+/**
+ * A typed request, cut into wishlist items.
+ *
+ * Splits on the separators people actually use for lists — commas, "and", newlines, bullets — and
+ * strips the verbs a request opens with ("buy me a…", "find…") so the item reads as a thing rather
+ * than an instruction. Anything it cannot split stays one item, which is the right answer for
+ * "skincare".
+ */
+function splitGoal(goal: string): string[] {
+  const parts = goal
+    .split(/\n+|,|;|\band\b|\bplus\b|&/i)
+    .map((part) =>
+      part
+        .replace(/^[\s\-*•\d.)]+/, "")
+        .replace(/^(?:can you\s+|please\s+|i(?:'d| would) like\s+|i want\s+|i need\s+)/i, "")
+        .replace(/^(?:buy|get|find|order|purchase|search for|look for|source)\s+/i, "")
+        .replace(/^(?:me\s+)?(?:a|an|some|the)\s+/i, "")
+        .trim(),
+    )
+    .filter((part) => part.length > 1);
+
+  const unique: string[] = [];
+  for (const part of parts) {
+    if (!unique.some((existing) => existing.toLowerCase() === part.toLowerCase())) {
+      unique.push(part);
+    }
+  }
+  // Fall back to the raw goal rather than an empty wishlist, which the UI cannot dispatch.
+  if (unique.length === 0) return [goal.slice(0, 80) || "something nice"];
+  return unique.slice(0, 6);
+}
+
+function slug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "item"
+  );
 }
 
 function delay(ms: number): Promise<void> {
