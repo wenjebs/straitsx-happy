@@ -24,11 +24,15 @@
 }
 
 .mark {
-  display: inline-block;
-  width: 21px;
-  height: 21px;
-  border-radius: 5px;
-  background: currentColor;
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  object-fit: contain;
+}
+
+.story .mark {
+  background: var(--surface);
 }
 
 .storyBody {

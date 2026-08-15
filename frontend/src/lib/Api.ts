@@ -252,17 +252,26 @@ export interface WalletDepositResult {
 
 export interface Mandate {
   autoApprove: boolean;
-  /** Whole SGD, matching the slider units. */
+  /** Whole SGD entered by the user. */
   itemCap: number;
   actCap: number;
-  categoryRules: Record<string, "allowed" | "ask first" | "blocked">;
+}
+
+export interface ShippingAddress {
+  recipientName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  stateOrProvince: string;
+  postalCode: string;
+  country: string;
+  phone: string;
 }
 
 export interface Settings {
-  notify: boolean;
-  sandbox: boolean;
   region: string;
   dataRetention: string;
+  shippingAddress: ShippingAddress | null;
 }
 
 export interface Profile {
@@ -538,8 +547,8 @@ export function rejectPick(id: string, itemId: string): Promise<Activity> {
 }
 
 /**
- * Begins checkout. The backend enforces sandbox/remote provider mode and owns
- * all retries, so it is deliberately not retried anywhere in this client.
+ * Begins checkout. The backend owns provider selection and all retries, so it
+ * is deliberately not retried anywhere in this client.
  *
  * `idempotencyKey` lets the backend collapse a duplicate submission (double
  * click, refresh mid-flight) into one execution rather than two.

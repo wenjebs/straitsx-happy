@@ -122,8 +122,13 @@ export class MemoryRepository implements Repository {
 
   async getMandate(userId: string): Promise<Mandate> {
     const mandate = this.mandates.get(userId) ?? defaultMandate();
-    this.mandates.set(userId, structuredClone(mandate));
-    return structuredClone(mandate);
+    const current = {
+      autoApprove: mandate.autoApprove,
+      itemCap: mandate.itemCap,
+      actCap: mandate.actCap,
+    };
+    this.mandates.set(userId, structuredClone(current));
+    return structuredClone(current);
   }
 
   async putMandate(userId: string, mandate: Mandate): Promise<void> {
@@ -132,8 +137,13 @@ export class MemoryRepository implements Repository {
 
   async getSettings(userId: string): Promise<Settings> {
     const settings = this.settings.get(userId) ?? defaultSettings();
-    this.settings.set(userId, structuredClone(settings));
-    return structuredClone(settings);
+    const current = {
+      region: settings.region,
+      dataRetention: settings.dataRetention,
+      shippingAddress: settings.shippingAddress ?? null,
+    };
+    this.settings.set(userId, structuredClone(current));
+    return structuredClone(current);
   }
 
   async putSettings(userId: string, settings: Settings): Promise<void> {

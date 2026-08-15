@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Toggle } from "../components/Toggle";
 import type { Mandate } from "../lib/Api";
 import styles from "./MandateScreen.module.css";
@@ -7,7 +8,52 @@ interface MandateScreenProps {
   onChange: (changes: Partial<Mandate>) => void;
 }
 
-const CYCLE = ["allowed", "ask first", "blocked"] as const;
+interface MoneyInputProps {
+  value: number;
+  min: number;
+  max: number;
+  label: string;
+  onCommit: (value: number) => void;
+}
+
+function MoneyInput({ value, min, max, label, onCommit }: MoneyInputProps) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const amount = Number(draft);
+    if (!Number.isInteger(amount) || amount < min || amount > max) {
+      setDraft(String(value));
+      return;
+    }
+    if (amount !== value) onCommit(amount);
+  };
+
+  return (
+    <label className={styles.amountControl}>
+      <span className={styles.currency}>S$</span>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            setDraft(String(value));
+          }
+        }}
+        className={styles.amountInput}
+        aria-label={label}
+      />
+    </label>
+  );
+}
 
 /** What agents may spend without asking. The caps feed the wishlist and shortlist. */
 export function MandateScreen({ mandate, onChange }: MandateScreenProps) {
@@ -40,65 +86,29 @@ export function MandateScreen({ mandate, onChange }: MandateScreenProps) {
           <div className={styles.row}>
             <div className={styles.rowBody}>
               <div className={styles.name}>Per-item cap</div>
-              <div className={styles.desc}>Highest single line item an agent may buy.</div>
+              <div className={styles.desc}>Highest single item an agent may buy, in SGD.</div>
             </div>
-            <input
-              type="range"
-              min={100}
-              max={1500}
-              step={50}
+            <MoneyInput
               value={mandate.itemCap}
-              onChange={(e) => onChange({ itemCap: Number(e.target.value) })}
-              className={styles.slider}
-              aria-label="Per-item cap"
+              min={1}
+              max={mandate.actCap}
+              label="Per-item cap in SGD"
+              onCommit={(itemCap) => onChange({ itemCap })}
             />
-            <span className={styles.value}>S${mandate.itemCap}</span>
           </div>
 
           <div className={styles.row}>
             <div className={styles.rowBody}>
               <div className={styles.name}>Per-activity cap</div>
-              <div className={styles.desc}>Total across all items in one activity.</div>
+              <div className={styles.desc}>Total allowed across one activity, in SGD.</div>
             </div>
-            <input
-              type="range"
-              min={500}
-              max={6000}
-              step={100}
+            <MoneyInput
               value={mandate.actCap}
-              onChange={(e) => onChange({ actCap: Number(e.target.value) })}
-              className={styles.slider}
-              aria-label="Per-activity cap"
+              min={mandate.itemCap}
+              max={1_000_000}
+              label="Per-activity cap in SGD"
+              onCommit={(actCap) => onChange({ actCap })}
             />
-            <span className={styles.value}>S${mandate.actCap}</span>
-          </div>
-
-          <div className={styles.rules}>
-            <div className={styles.rulesTitle}>Category rules</div>
-            <div className={styles.rulesDesc}>
-              Optional. Tap to switch a category between allowed, ask first, and blocked.
-            </div>
-            <div className={styles.chips}>
-              {Object.entries(mandate.categoryRules).map(([name, rule]) => (
-                <button
-                  type="button"
-                  key={name}
-                  onClick={() =>
-                    onChange({
-                      categoryRules: {
-                        ...mandate.categoryRules,
-                        [name]: CYCLE[(CYCLE.indexOf(rule) + 1) % CYCLE.length] ?? "allowed",
-                      },
-                    })
-                  }
-                  className={`${styles.chip} ${
-                    rule === "allowed" ? styles.allowed : rule === "blocked" ? styles.blocked : ""
-                  }`}
-                >
-                  {name} <span className={styles.chipState}>{rule}</span>
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       </div>

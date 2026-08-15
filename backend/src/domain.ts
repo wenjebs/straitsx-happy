@@ -249,14 +249,23 @@ export interface Mandate {
   autoApprove: boolean;
   itemCap: number;
   actCap: number;
-  categoryRules: Record<string, "allowed" | "ask first" | "blocked">;
+}
+
+export interface ShippingAddress {
+  recipientName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  stateOrProvince: string;
+  postalCode: string;
+  country: string;
+  phone: string;
 }
 
 export interface Settings {
-  notify: boolean;
-  sandbox: boolean;
   region: string;
   dataRetention: string;
+  shippingAddress: ShippingAddress | null;
 }
 
 export interface Profile {

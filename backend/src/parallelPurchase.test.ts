@@ -123,6 +123,20 @@ async function harness(itemIds: string[] = ITEMS) {
   const wallet = await repository.getWallet("demo-user");
   wallet.balanceMinor = 100_000;
   await repository.putWallet("demo-user", wallet);
+  const settings = await repository.getSettings("demo-user");
+  await repository.putSettings("demo-user", {
+    ...settings,
+    shippingAddress: {
+      recipientName: "Demo User",
+      addressLine1: "1 Test Street",
+      addressLine2: "#01-01",
+      city: "Singapore",
+      stateOrProvince: "Singapore",
+      postalCode: "018956",
+      country: "Singapore",
+      phone: "+65 6123 4567",
+    },
+  });
 
   return { repository, purchases, cards, agents, activity };
 }

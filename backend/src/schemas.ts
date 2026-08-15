@@ -34,22 +34,32 @@ export const WalletAuthVerifyBody = z.object({
   signature: z.string().regex(/^0x[0-9a-fA-F]+$/, "must be a hexadecimal signature"),
 });
 
-const CategoryRule = z.enum(["allowed", "ask first", "blocked"]);
 export const MandatePatch = z
   .object({
     autoApprove: z.boolean().optional(),
     itemCap: z.number().int().min(1).max(1_000_000).optional(),
     actCap: z.number().int().min(1).max(1_000_000).optional(),
-    categoryRules: z.record(z.string().min(1), CategoryRule).optional(),
+  })
+  .strict();
+
+const ShippingAddress = z
+  .object({
+    recipientName: z.string().trim().min(1).max(120),
+    addressLine1: z.string().trim().min(1).max(200),
+    addressLine2: z.string().trim().max(200),
+    city: z.string().trim().min(1).max(100),
+    stateOrProvince: z.string().trim().max(100),
+    postalCode: z.string().trim().min(2).max(20),
+    country: z.string().trim().min(2).max(80),
+    phone: z.string().trim().max(40),
   })
   .strict();
 
 export const SettingsPatch = z
   .object({
-    notify: z.boolean().optional(),
-    sandbox: z.boolean().optional(),
     region: z.string().min(1).max(120).optional(),
     dataRetention: z.string().min(1).max(120).optional(),
+    shippingAddress: ShippingAddress.optional(),
   })
   .strict();
 

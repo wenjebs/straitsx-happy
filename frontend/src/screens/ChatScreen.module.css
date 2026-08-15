@@ -178,6 +178,12 @@
   background: none;
 }
 
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .send {
   width: 32px;
   height: 32px;

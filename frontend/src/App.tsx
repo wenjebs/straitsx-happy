@@ -198,7 +198,7 @@ function AuthenticatedApp({
             {state.screen === "settings" && (
               <SettingsScreen
                 settings={state.settings}
-                onToggle={(key) => void actions.setSetting(key)}
+                onSaveAddress={(shippingAddress) => actions.setSettings({ shippingAddress })}
               />
             )}
             {state.screen === "profile" && (

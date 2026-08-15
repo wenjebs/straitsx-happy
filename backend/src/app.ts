@@ -431,7 +431,6 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
       autoApprove: patch.autoApprove ?? current.autoApprove,
       itemCap: patch.itemCap ?? current.itemCap,
       actCap: patch.actCap ?? current.actCap,
-      categoryRules: patch.categoryRules ?? current.categoryRules,
     };
     if (mandate.itemCap > mandate.actCap) {
       throw new HttpError(422, "Per-item cap cannot exceed the per-activity cap.");
@@ -446,10 +445,9 @@ export function createApp(deps: AppDependencies): Hono<AppBindings> {
     const userId = c.get("user").id;
     const current = await deps.repository.getSettings(userId);
     const settings = {
-      notify: patch.notify ?? current.notify,
-      sandbox: patch.sandbox ?? current.sandbox,
       region: patch.region ?? current.region,
       dataRetention: patch.dataRetention ?? current.dataRetention,
+      shippingAddress: patch.shippingAddress ?? current.shippingAddress,
     };
     await deps.repository.putSettings(userId, settings);
     return c.json(settings);

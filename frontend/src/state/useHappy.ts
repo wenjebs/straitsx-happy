@@ -153,7 +153,7 @@ export interface HappyActions {
   confirmPurchase: () => Promise<void>;
   setWallet: (wallet: Api.Wallet) => void;
   setMandate: (changes: Partial<Api.Mandate>) => Promise<void>;
-  setSetting: (key: "notify" | "sandbox") => Promise<void>;
+  setSettings: (changes: Partial<Api.Settings>) => Promise<void>;
   goScreen: (screen: Screen) => void;
   back: () => void;
   openActivity: (id: string) => Promise<void>;
@@ -431,12 +431,8 @@ export function useHappy(): Happy {
       setMandate: (changes) =>
         guard(async () => set({ mandate: await Api.updateMandate(changes), error: null })),
 
-      setSetting: (key) =>
-        guard(async () => {
-          const current = stateRef.current.settings;
-          if (!current) return;
-          set({ settings: await Api.updateSettings({ [key]: !current[key] }), error: null });
-        }),
+      setSettings: (changes) =>
+        guard(async () => set({ settings: await Api.updateSettings(changes), error: null })),
 
       goScreen: (screen) => set({ screen }),
 

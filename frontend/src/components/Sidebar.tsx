@@ -17,7 +17,7 @@ export function Sidebar({ open, screen, onPurchase, onNavigate, onToggle }: Side
   return (
     <aside className={`${styles.sidebar} ${open ? "" : styles.collapsed}`}>
       <div className={styles.brand}>
-        <div className={styles.mark} />
+        <img src="/happy-mascot.png" alt="" className={styles.mark} />
         {open && <span className={styles.wordmark}>Happy</span>}
       </div>
 

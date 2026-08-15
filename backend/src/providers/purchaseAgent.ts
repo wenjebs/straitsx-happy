@@ -1,4 +1,4 @@
-import type { Listing, WishlistItem } from "../domain.js";
+import type { Listing, ShippingAddress, WishlistItem } from "../domain.js";
 import { HttpError } from "../errors.js";
 
 export interface CardGrant {
@@ -14,6 +14,7 @@ export interface PurchaseAgentRequest {
   attemptId: string;
   item: WishlistItem;
   listing: Listing;
+  shippingAddress: ShippingAddress;
   cardGrant: CardGrant;
   sandbox: boolean;
   idempotencyKey: string;
@@ -102,7 +103,7 @@ export class LocalPurchaseAgentProvider implements PurchaseAgentProvider {
 
   async startPurchase(request: PurchaseAgentRequest): Promise<void> {
     if (!request.sandbox) {
-      throw new HttpError(409, "Local Closer failsafe only runs in Sandbox mode.");
+      throw new HttpError(409, "Local Closer failsafe cannot accept a production purchase.");
     }
     this.cancelledAttempts.delete(request.attemptId);
     void this.run(request).catch(async (error) => {
