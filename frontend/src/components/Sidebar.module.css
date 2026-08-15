@@ -1,0 +1,81 @@
+.sidebar {
+  width: 216px;
+  flex: none;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-sunken);
+  transition: width var(--t-sidebar);
+  overflow: hidden;
+}
+
+.collapsed {
+  width: 60px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 56px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--text-primary);
+  flex: none;
+}
+
+.wordmark {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 9px;
+  border: none;
+  border-radius: var(--r-control);
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.item:hover {
+  background: var(--hover-nav);
+  color: var(--text-primary);
+}
+
+.item svg {
+  flex: none;
+}
+
+.active {
+  background: var(--nav-active);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.footer {
+  margin-top: auto;
+  padding: 10px 8px;
+  border-top: 1px solid var(--border-subtle);
+}
